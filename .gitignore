@@ -1,0 +1,42 @@
+# Emacs package manager
+elpa/
+
+# Emacs native compilation cache
+eln-cache/
+
+# Emacs cache and auto-save
+.cache/
+auto-save-list/
+
+# Backup files
+*~
+\#*\#
+
+# Compiled elisp
+*.elc
+
+# Shell history
+eshell/
+history
+
+# TRAMP connection history
+tramp
+
+# URL history
+url/
+
+# Transient (popup) history
+transient/
+
+# Projectile
+projectile-bookmarks.eld
+projects
+
+# Geiser REPL history
+geiser-history.guile
+
+# Customize settings (user-specific)
+custom.el
+
+# Backup init file
+init.el~
