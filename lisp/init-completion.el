@@ -31,6 +31,7 @@
   :bind (("C-s" . consult-line)
          ("C-c h" . consult-history)
          ("C-c m" . consult-mode-command)
+         ("C-x /" . consult-ripgrep)
          ("C-x b" . consult-buffer)
          ("C-x 4 b" . consult-buffer-other-window)
          ("M-y" . consult-yank-pop)

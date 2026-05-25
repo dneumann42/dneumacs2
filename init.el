@@ -2,6 +2,8 @@
 
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 
+(setq enable-local-variables :all)
+
 (require 'init-package)
 (require 'init-ui)
 (require 'init-modeline)
@@ -9,6 +11,7 @@
 (require 'init-scheme)
 (require 'init-common-lisp)
 (require 'init-project)
+(require 'init-c)
 (require 'init-nim)
 (require 'init-treemacs)
 

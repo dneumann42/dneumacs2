@@ -52,11 +52,17 @@
   (setq make-backup-files nil)
   (setq auto-save-default nil)
   (setq create-lockfiles nil)
+  (setq auto-revert-verbose nil)
   (init/set-default-font)
   (global-set-key (kbd "C-c t") #'init/toggle-frame-transparency)
   (global-set-key (kbd "C-c r") #'init/reload-config)
+  (init/toggle-frame-transparency)
   :config
-  (configure-electric-pair-mode))
+  (configure-electric-pair-mode)
+  (global-auto-revert-mode 1))
+
+(use-package ace-window
+  :bind (("C-0" . ace-window)))
 
 (use-package ligature
   :config
