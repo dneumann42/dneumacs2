@@ -3,6 +3,7 @@
 (add-to-list 'load-path (expand-file-name "lisp" user-emacs-directory))
 
 (setq enable-local-variables :all)
+(setq inhibit-startup-screen t)
 
 (require 'package)
 (require 'package-setup)
