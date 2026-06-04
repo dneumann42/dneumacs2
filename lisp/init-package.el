@@ -22,6 +22,12 @@
 ;; We use Eglot for Nim LSP, so skip native-comp for this helper file.
 (init/native-comp-deny ".*nim-suggest\\.el\\'")
 
+;; Async native compilation of freshly installed packages (e.g. sly) emits
+;; harmless "function X is not known to be defined" warnings because each
+;; file is compiled in isolation. Log them to *Warnings* without popping
+;; up the buffer.
+(setq native-comp-async-report-warnings-errors 'silent)
+
 (defun init/package-archive-stale-p (&optional max-age-days)
   "Return non-nil when package archive metadata is older than MAX-AGE-DAYS.
 Defaults to 7 days."

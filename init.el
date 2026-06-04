@@ -7,6 +7,7 @@
 (require 'init-modeline)
 (require 'init-completion)
 (require 'init-scheme)
+(require 'init-common-lisp)
 (require 'init-project)
 (require 'init-nim)
 (require 'init-treemacs)
