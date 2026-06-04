@@ -1,4 +1,4 @@
-;;; init-modeline.el --- Modeline setup -*- lexical-binding: t; -*-
+;;; modeline.el --- Modeline setup -*- lexical-binding: t; -*-
 
 (use-package nerd-icons
   :defer t)
@@ -15,5 +15,5 @@
   (doom-modeline-icon t)
   (doom-modeline-project-detection 'project))
 
-(provide 'init-modeline)
-;;; init-modeline.el ends here
+(provide 'modeline)
+;;; modeline.el ends here

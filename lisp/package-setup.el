@@ -1,4 +1,4 @@
-;;; init-package.el --- Package setup -*- lexical-binding: t; -*-
+;;; package-setup.el --- Package setup -*- lexical-binding: t; -*-
 
 (setq use-package-always-ensure t)
 
@@ -53,5 +53,5 @@ Defaults to 7 days."
 
 (require 'use-package)
 
-(provide 'init-package)
-;;; init-package.el ends here
+(provide 'package-setup)
+;;; package-setup.el ends here

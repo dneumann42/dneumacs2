@@ -1,4 +1,4 @@
-;;; init-project.el --- Project tooling -*- lexical-binding: t; -*-
+;;; project-tools.el --- Project tooling -*- lexical-binding: t; -*-
 
 (use-package projectile
   :ensure t
@@ -7,5 +7,5 @@
   (define-key projectile-mode-map (kbd "s-p") 'projectile-command-map)
   (define-key projectile-mode-map (kbd "C-c p") 'projectile-command-map))
 
-(provide 'init-project)
-;;; init-project.el ends here
+(provide 'project-tools)
+;;; project-tools.el ends here

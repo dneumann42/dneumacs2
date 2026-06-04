@@ -1,4 +1,4 @@
-;;; init-completion.el --- Minibuffer/completion UX -*- lexical-binding: t; -*-
+;;; completion.el --- Minibuffer/completion UX -*- lexical-binding: t; -*-
 
 (use-package savehist
   :ensure nil
@@ -6,6 +6,7 @@
   (savehist-mode 1))
 
 (use-package vertico
+  :ensure t
   :init
   (vertico-mode 1)
   :custom
@@ -17,17 +18,29 @@
         ("C-f" . vertico-exit)
         ("M-RET" . vertico-exit-input)))
 
+(use-package corfu
+  :ensure t
+  :custom
+  (corfu-auto t)
+  (corfu-auto-prefix 3)
+  (corfu-auto-delay 0.2)
+  :init
+  (global-corfu-mode 1))
+
 (use-package orderless
+  :ensure t
   :custom
   (completion-styles '(orderless basic))
   (completion-category-defaults nil)
   (completion-category-overrides '((file (styles partial-completion)))))
 
 (use-package marginalia
+  :ensure t
   :init
   (marginalia-mode 1))
 
 (use-package consult
+  :ensure t
   :bind (("C-s" . consult-line)
          ("C-c h" . consult-history)
          ("C-c m" . consult-mode-command)
@@ -45,6 +58,7 @@
   (require 'embark-consult nil t))
 
 (use-package embark
+  :ensure t
   :bind (("C-." . embark-act)
          ("C-;" . embark-dwim)
          ("C-h B" . embark-bindings))
@@ -52,7 +66,24 @@
   (setq prefix-help-command #'embark-prefix-help-command))
 
 (use-package embark-consult
+  :ensure t
   :after (embark consult))
 
-(provide 'init-completion)
-;;; init-completion.el ends here
+(use-package yasnippet
+  :ensure t
+  :custom
+  (yas-snippet-dirs '("~/.emacs.d/snippets"))
+  :bind (("C-c ." . yas-insert-snippet))
+  :hook ((text-mode
+          prog-mode
+          conf-mode
+          snippet-mode) . yas-minor-mode-on)
+  :config
+  (yas-global-mode 1))
+
+(use-package yasnippet-snippets
+  :ensure t
+  :after (yasnippet))
+
+(provide 'completion)
+;;; completion.el ends here

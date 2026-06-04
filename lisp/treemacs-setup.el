@@ -1,4 +1,4 @@
-;;; init-treemacs.el --- Treemacs setup -*- lexical-binding: t; -*-
+;;; treemacs-setup.el --- Treemacs setup -*- lexical-binding: t; -*-
 
 (use-package treemacs
   :ensure t
@@ -7,13 +7,12 @@
   (progn
     (setq treemacs-buffer-name-function            #'treemacs-default-buffer-name
           treemacs-buffer-name-prefix              " *Treemacs-Buffer-"
-          treemacs-collapse-dirs                   (if treemacs-python-executable 3 0)
           treemacs-deferred-git-apply-delay        0.5
           treemacs-directory-name-transformer      #'identity
           treemacs-display-in-side-window          t
           treemacs-eldoc-display                   'simple
           treemacs-file-event-delay                2000
-          treemacs-file-extension-regex            treemacs-last-period-regex-value
+          treemacs-file-extension-regex            "\\.[^.]*\\'"
           treemacs-file-follow-delay               0.2
           treemacs-file-name-transformer           #'identity
           treemacs-follow-after-init               t
@@ -62,6 +61,9 @@
           treemacs-width-is-initially-locked       t
           treemacs-workspace-switch-cleanup        nil)
 
+    (setq treemacs-collapse-dirs
+          (if (bound-and-true-p treemacs-python-executable) 3 0))
+
     ;; The default width and height of the icons is 22 pixels. If you are
     ;; using a Hi-DPI display, uncomment this to double the icon size.
     ;;(treemacs-resize-icons 44)
@@ -69,11 +71,11 @@
     (treemacs-follow-mode t)
     (treemacs-filewatch-mode t)
     (treemacs-fringe-indicator-mode 'always)
-    (when treemacs-python-executable
+    (when (bound-and-true-p treemacs-python-executable)
       (treemacs-git-commit-diff-mode t))
 
     (pcase (cons (not (null (executable-find "git")))
-                 (not (null treemacs-python-executable)))
+                 (not (null (bound-and-true-p treemacs-python-executable))))
       (`(t . t)
        (treemacs-git-mode 'deferred))
       (`(t . _)
@@ -94,9 +96,11 @@
   :after (treemacs evil)
   :ensure t)
 
-(use-package treemacs-projectile
-  :after (treemacs projectile)
-  :ensure t)
+(defvar treemacs-project-map (make-sparse-keymap)
+  "Fallback Treemacs project keymap, used until Treemacs initializes it.")
+
+(with-eval-after-load 'treemacs-mode
+  (require 'treemacs-projectile nil t))
 
 (use-package treemacs-icons-dired
   :hook (dired-mode . treemacs-icons-dired-enable-once)
@@ -119,5 +123,5 @@
 ;; Avoid startup focus grabs that can leave Evil in an unexpected state.
 ;; Open Treemacs manually with `C-x t t`.
 
-(provide 'init-treemacs)
-;;; init-treemacs.el ends here
+(provide 'treemacs-setup)
+;;; treemacs-setup.el ends here

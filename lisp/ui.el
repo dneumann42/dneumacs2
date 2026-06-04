@@ -1,4 +1,4 @@
-;;; init-ui.el --- Core UI and editor defaults -*- lexical-binding: t; -*-
+;;; ui.el --- Core UI and editor defaults -*- lexical-binding: t; -*-
 
 (defun configure-electric-pair-mode ()
   (setq electric-pair-pairs
@@ -10,6 +10,10 @@
 
 (defvar init/frame-alpha-opaque 100)
 (defvar init/frame-alpha-translucent 85)
+
+(defun init/apply-frame-transparency (&optional frame)
+  "Make FRAME use the configured translucent background alpha."
+  (set-frame-parameter frame 'alpha-background init/frame-alpha-translucent))
 
 (defun init/toggle-frame-transparency ()
   "Toggle the current frame between opaque and translucent."
@@ -53,16 +57,23 @@
   (setq auto-save-default nil)
   (setq create-lockfiles nil)
   (setq auto-revert-verbose nil)
+  (add-to-list 'default-frame-alist
+               `(alpha-background . ,init/frame-alpha-translucent))
   (init/set-default-font)
   (global-set-key (kbd "C-c t") #'init/toggle-frame-transparency)
   (global-set-key (kbd "C-c r") #'init/reload-config)
-  (init/toggle-frame-transparency)
+  (init/apply-frame-transparency)
   :config
   (configure-electric-pair-mode)
   (global-auto-revert-mode 1))
 
 (use-package ace-window
   :bind (("C-0" . ace-window)))
+
+(use-package avy
+  :ensure t
+  :config
+  (global-set-key (kbd "C-:") 'avy-goto-char))
 
 (use-package ligature
   :config
@@ -105,5 +116,5 @@
 (add-hook 'window-selection-change-functions
           #'init/evil-normalize-on-window-change)
 
-(provide 'init-ui)
-;;; init-ui.el ends here
+(provide 'ui)
+;;; ui.el ends here
