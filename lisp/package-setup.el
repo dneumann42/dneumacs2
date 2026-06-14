@@ -19,7 +19,7 @@
     (add-to-list 'native-comp-deferred-compilation-deny-list pattern)))
 
 ;; nim-mode's nimsuggest helper can emit noisy false-positive native-comp warnings.
-;; We use Eglot for Nim LSP, so skip native-comp for this helper file.
+;; Skip native-comp for this helper file.
 (init/native-comp-deny ".*nim-suggest\\.el\\'")
 
 ;; Async native compilation of freshly installed packages (e.g. sly) emits

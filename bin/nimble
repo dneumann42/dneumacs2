@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+REAL_NIMBLE="${REAL_NIMBLE:-$HOME/.nimble/bin/nimble}"
+
+if [[ "${1:-}" == "dump" && "${2:-}" == /*/*.nimble ]]; then
+  nimble_file="$2"
+  project_dir="$(dirname "$nimble_file")"
+  cd "$project_dir"
+  exec "$REAL_NIMBLE" dump "${@:3}"
+fi
+
+exec "$REAL_NIMBLE" "$@"
