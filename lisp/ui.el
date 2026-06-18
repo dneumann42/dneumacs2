@@ -116,5 +116,82 @@
 (add-hook 'window-selection-change-functions
           #'init/evil-normalize-on-window-change)
 
+;;; Floating compilation panel — child frame at top-right
+
+(defvar init/compilation-frame nil
+  "Child frame showing the compilation buffer at top-right.")
+
+(defun init/display-compilation-in-child-frame (buffer alist)
+  "Display BUFFER in a child frame at top-right of the current frame."
+  (condition-case err
+      (progn
+        (when (and init/compilation-frame (frame-live-p init/compilation-frame))
+          (delete-frame init/compilation-frame))
+        (let* ((parent (selected-frame))
+               (char-width (frame-char-width parent))
+               (child-width (* 80 char-width))
+               (parent-width (frame-pixel-width parent))
+               (left-pos (- parent-width child-width 20))
+               (frame (make-frame
+                       `((parent-frame . ,parent)
+                         (width . 80)
+                         (height . 20)
+                         (top . 10)
+                         (left . ,left-pos)
+                         (undecorated . t))))
+               (window (frame-root-window frame)))
+          (setq init/compilation-frame frame)
+          (set-window-buffer window buffer)
+          (raise-frame frame)
+          (message "compile panel: frame pos=%s size=%dx%d visible=%s"
+                   (frame-position frame)
+                   (frame-pixel-width frame)
+                   (frame-pixel-height frame)
+                   (frame-visible-p frame))
+          window))
+    (error
+     (message "compile panel: error: %s" (error-message-string err))
+     nil)))
+
+(add-to-list 'display-buffer-alist
+             '("\\*compilation\\*"
+               (init/display-compilation-in-child-frame)))
+
+;; Restore focus to the original frame after compile finishes
+(defun init/compilation--restore-focus (&rest _)
+  (when (and init/compilation-frame (frame-live-p init/compilation-frame))
+    (let ((parent (frame-parent init/compilation-frame)))
+      (when (and parent (frame-live-p parent))
+        (select-frame-set-input-focus parent)))))
+
+(advice-add 'compile :after #'init/compilation--restore-focus)
+
+(defun init/compilation-dismiss ()
+  "Dismiss the compilation child frame."
+  (interactive)
+  (when (and init/compilation-frame (frame-live-p init/compilation-frame))
+    (delete-frame init/compilation-frame)
+    (setq init/compilation-frame nil)))
+
+(defun init/compilation-toggle ()
+  "Toggle the compilation child frame on and off.
+If no compilation buffer exists, start a new compilation."
+  (interactive)
+  (if (and init/compilation-frame (frame-live-p init/compilation-frame))
+      (init/compilation-dismiss)
+    (let ((buf (get-buffer "*compilation*")))
+      (if (buffer-live-p buf)
+          (init/display-compilation-in-child-frame buf nil)
+        (call-interactively #'compile)))))
+
+(defun init/compilation-mode-hook ()
+  "Bind q to dismiss the compilation child frame."
+  (define-key compilation-mode-map (kbd "q") #'init/compilation-dismiss))
+
+(add-hook 'compilation-mode-hook #'init/compilation-mode-hook)
+
+(global-set-key (kbd "C-c c") #'init/compilation-toggle)
+(global-set-key (kbd "<f5>") #'compile)
+
 (provide 'ui)
 ;;; ui.el ends here

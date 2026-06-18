@@ -1,7 +1,33 @@
 ;;; modeline.el --- Modeline setup -*- lexical-binding: t; -*-
 
 (use-package nerd-icons
-  :defer t)
+  :defer t
+  :init
+  (defun init/nerd-icons-font-family ()
+    "Return the first installed Nerd Font family we can use."
+    (let ((families (font-family-list)))
+      (catch 'found
+        (dolist (font '("Symbols Nerd Font Mono"
+                        "Symbols Nerd Font"
+                        "MesloLGS Nerd Font Mono"
+                        "MesloLGM Nerd Font Mono"
+                        "MesloLGL Nerd Font Mono"
+                        "FantasqueSansM Nerd Font Mono"))
+          (when (member font families)
+            (throw 'found font))))))
+
+  (defun init/configure-nerd-icons-font (&optional frame)
+    "Bind `nerd-icons' to an installed Nerd Font family.
+FRAME is used when Emacs creates new frames after startup."
+    (when (display-graphic-p frame)
+      (let ((font (init/nerd-icons-font-family)))
+        (when font
+          (setq nerd-icons-font-family font)
+          (when (fboundp 'nerd-icons-set-font)
+            (nerd-icons-set-font font frame))))))
+
+  (add-hook 'after-init-hook #'init/configure-nerd-icons-font)
+  (add-hook 'after-make-frame-functions #'init/configure-nerd-icons-font))
 
 (use-package doom-modeline
   :init
