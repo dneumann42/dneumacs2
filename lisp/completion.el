@@ -85,5 +85,16 @@
   :ensure t
   :after (yasnippet))
 
+(use-package which-key
+  :ensure t
+  :commands (which-key-mode)
+  :custom
+  (which-key-idle-delay 0.35)
+  (which-key-idle-secondary-delay 0.05)
+  (which-key-sort-order 'which-key-key-order-alpha)
+  (which-key-max-description-length 40)
+  :init
+  (run-with-idle-timer 1 nil #'which-key-mode))
+
 (provide 'completion)
 ;;; completion.el ends here

@@ -16,6 +16,7 @@
 (require 'c-tools)
 (require 'nim)
 (require 'rust)
+(require 'ocaml)
 (require 'ron)
 (require 'treemacs-setup)
 (require 'init-common-lisp)

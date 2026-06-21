@@ -30,6 +30,13 @@
      "clangd not found in PATH. Install clangd for C LSP support."
      :warning)))
 
+(defun init/c-format-buffer-on-save ()
+  "Format the current buffer with Eglot when a C/C++ LSP server is attached."
+  (when (and (fboundp 'eglot-managed-p)
+             (eglot-managed-p)
+             (fboundp 'eglot-format-buffer))
+    (eglot-format-buffer)))
+
 (defun init/c-setup ()
   "Set up C editing, LSP and diagnostics in current buffer."
   (when (derived-mode-p 'c-mode)
@@ -46,6 +53,7 @@
     (flymake-mode -1))
   (when (fboundp 'flycheck-mode)
     (flycheck-mode 1))
+  (add-hook 'before-save-hook #'init/c-format-buffer-on-save nil t)
   (local-set-key (kbd "C-c l h") #'init/c-hover-doc)
   (local-set-key (kbd "C-c l d") #'init/c-show-diagnostics)
   (local-set-key (kbd "M-RET") #'eglot-code-actions)
@@ -56,16 +64,17 @@
   :ensure nil
   :mode (("\\.c\\'" . c-mode)
          ("\\.h\\'" . c-mode))
-  :hook (c-mode . init/c-setup))
+  :hook ((c-mode c++-mode) . init/c-setup))
 
 (add-hook 'c-ts-mode-hook #'init/c-setup)
+(add-hook 'c++-ts-mode-hook #'init/c-setup)
 
 (use-package eglot
   :ensure nil
   :commands (eglot eglot-ensure eglot-code-actions)
   :config
   (add-to-list 'eglot-server-programs
-               '((c-mode c-ts-mode) . ("clangd"))))
+               '((c-mode c++-mode c-ts-mode c++-ts-mode) . ("clangd"))))
 
 (use-package flycheck
   :defer t)

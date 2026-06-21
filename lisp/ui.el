@@ -43,6 +43,17 @@
       (set-face-attribute 'default nil :font font)
       (set-face-attribute 'fixed-pitch nil :font font))))
 
+(defun init/git-repo-root (&optional dir)
+  "Return the Git repository root for DIR, or nil if DIR is not in a repo."
+  (let ((dir (file-name-as-directory (expand-file-name (or dir default-directory)))))
+    (locate-dominating-file dir ".git")))
+
+(defun init/set-default-directory-to-git-root ()
+  "Make file-visiting buffers use the Git repository root as `default-directory'."
+  (when buffer-file-name
+    (when-let ((root (init/git-repo-root buffer-file-name)))
+      (setq-local default-directory root))))
+
 (use-package emacs
   :ensure nil
   :init
@@ -65,7 +76,8 @@
   (init/apply-frame-transparency)
   :config
   (configure-electric-pair-mode)
-  (global-auto-revert-mode 1))
+  (global-auto-revert-mode 1)
+  (add-hook 'find-file-hook #'init/set-default-directory-to-git-root))
 
 (use-package ace-window
   :bind (("C-0" . ace-window)))
