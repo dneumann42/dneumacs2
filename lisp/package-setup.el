@@ -11,6 +11,17 @@
 
 (package-initialize)
 
+(defun init/add-user-bin-to-path ()
+  "Add common per-user binary directories to PATH and `exec-path'."
+  (dolist (dir '("~/.local/bin"))
+    (let ((expanded (expand-file-name dir)))
+      (when (file-directory-p expanded)
+        (add-to-list 'exec-path expanded)
+        (setenv "PATH"
+                (concat expanded path-separator (or (getenv "PATH") "")))))))
+
+(init/add-user-bin-to-path)
+
 (defun init/native-comp-deny (pattern)
   "Add PATTERN to native compilation deny lists when available."
   (when (boundp 'native-comp-jit-compilation-deny-list)

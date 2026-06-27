@@ -4,6 +4,28 @@
   "Rust editing support."
   :group 'languages)
 
+(defcustom init/rust-cargo-bin-directory
+  (expand-file-name ".cargo/bin" (getenv "HOME"))
+  "Directory containing Cargo-installed Rust tools."
+  :type 'directory
+  :group 'init/rust)
+
+(defcustom init/rust-analyzer-command "rust-analyzer"
+  "Command used to start rust-analyzer."
+  :type 'string
+  :group 'init/rust)
+
+(defun init/rust--ensure-cargo-bin-in-path ()
+  "Make Cargo-installed tools visible to Emacs."
+  (when (file-directory-p init/rust-cargo-bin-directory)
+    (add-to-list 'exec-path init/rust-cargo-bin-directory)
+    (let ((paths (split-string (or (getenv "PATH") "") path-separator t)))
+      (unless (member init/rust-cargo-bin-directory paths)
+        (setenv "PATH"
+                (mapconcat #'identity
+                           (cons init/rust-cargo-bin-directory paths)
+                           path-separator))))))
+
 (defun init/rust-hover-doc ()
   "Show documentation for symbol at point."
   (interactive)
@@ -28,10 +50,11 @@
 
 (defun init/rust--server-missing-warning ()
   "Warn if rust-analyzer is not available in PATH."
-  (unless (executable-find "rust-analyzer")
+  (unless (executable-find init/rust-analyzer-command)
     (display-warning
      'rust
-     "rust-analyzer not found in PATH. Install rust-analyzer for Rust LSP support."
+     (format "%s not found in PATH. Install rust-analyzer for Rust LSP support."
+             init/rust-analyzer-command)
      :warning)))
 
 (defun init/rust-project-root ()
@@ -55,36 +78,12 @@
       (call-interactively #'eglot-code-action-quickfix)
     (call-interactively #'eglot-code-actions)))
 
-(defcustom init/rust-auto-reconnect-on-save t
-  "Reconnect rust-analyzer automatically after saving Rust workspace files."
-  :type 'boolean
-  :group 'init/rust)
-
-(defun init/rust--workspace-file-p ()
-  "Return non-nil when the current buffer is a Rust workspace file."
-  (let ((file (buffer-file-name)))
-    (and file
-         (or (string-match-p "\\.rs\\'" file)
-             (string-match-p "/Cargo\\.toml\\'" file)
-             (string-match-p "/build\\.rs\\'" file)))))
-
-(defun init/rust--reconnect-after-save ()
-  "Reconnect rust-analyzer after saving Rust workspace files.
-This helps when rust-analyzer keeps stale analysis around after Cargo or
-source edits."
-  (when (and init/rust-auto-reconnect-on-save
-             (init/rust--workspace-file-p)
-             (fboundp 'eglot-current-server)
-             (eglot-current-server)
-             (fboundp 'eglot-reconnect))
-    (eglot-reconnect (eglot-current-server))))
-
 (defun init/rust-setup ()
   "Set up Rust editing, LSP and diagnostics in current buffer."
+  (init/rust--ensure-cargo-bin-in-path)
   (init/rust--server-missing-warning)
   (when (fboundp 'eglot-ensure)
     (eglot-ensure))
-  (add-hook 'after-save-hook #'init/rust--reconnect-after-save nil t)
   (local-set-key (kbd "C-c l h") #'init/rust-hover-doc)
   (local-set-key (kbd "C-c l d") #'init/rust-show-diagnostics)
   (local-set-key (kbd "C-c l r") #'eglot-reconnect)
@@ -112,8 +111,9 @@ source edits."
   :ensure nil
   :commands (eglot eglot-ensure eglot-code-actions)
   :config
+  (init/rust--ensure-cargo-bin-in-path)
   (add-to-list 'eglot-server-programs
-               '((rust-mode rust-ts-mode) . ("rust-analyzer"))))
+               `((rust-mode rust-ts-mode) . (,init/rust-analyzer-command))))
 
 (provide 'rust)
 ;;; rust.el ends here

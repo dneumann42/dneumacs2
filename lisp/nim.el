@@ -312,6 +312,109 @@
    (t
     (message "No definition backend available."))))
 
+(defconst init/nim--operator-token-chars "+-*/\\=<>@$~&%|!?^.:"
+  "Characters that form Nim operator tokens.")
+
+(defconst init/nim--delimiter-token-chars "()[]{};,")
+
+(defun init/nim--forward-comment (&optional count)
+  "Move across whitespace and comments in direction COUNT."
+  (forward-comment (or count (buffer-size))))
+
+(defun init/nim--looking-at-token-char-p (chars)
+  "Return non-nil when point is before one of CHARS."
+  (and (not (eobp))
+       (memq (char-after) (string-to-list chars))))
+
+(defun init/nim--looking-back-at-token-char-p (chars)
+  "Return non-nil when point is after one of CHARS."
+  (and (not (bobp))
+       (memq (char-before) (string-to-list chars))))
+
+(defun init/nim-forward-token (&optional arg)
+  "Move forward across ARG Nim lexical tokens."
+  (interactive "p")
+  (dotimes (_ (or arg 1))
+    (init/nim--forward-comment)
+    (cond
+     ((eobp)
+      (user-error "No next Nim token"))
+     ((looking-at-p "`")
+      (forward-char 1)
+      (if (search-forward "`" nil t)
+          nil
+        (goto-char (point-max))))
+     ((looking-at-p "[[:alpha:]_]")
+      (skip-chars-forward "[:alnum:]_"))
+     ((looking-at-p "[[:digit:]]")
+      (skip-chars-forward "[:alnum:]_'."))
+     ((nth 3 (syntax-ppss))
+      (goto-char (nth 8 (syntax-ppss)))
+      (forward-sexp 1))
+     ((looking-at-p "\"\\|'")
+      (forward-sexp 1))
+     ((init/nim--looking-at-token-char-p init/nim--delimiter-token-chars)
+      (forward-char 1))
+     ((init/nim--looking-at-token-char-p init/nim--operator-token-chars)
+      (skip-chars-forward init/nim--operator-token-chars))
+     (t
+      (forward-char 1)))))
+
+(defun init/nim-backward-token (&optional arg)
+  "Move backward across ARG Nim lexical tokens."
+  (interactive "p")
+  (dotimes (_ (or arg 1))
+    (init/nim--forward-comment (- (buffer-size)))
+    (cond
+     ((bobp)
+      (user-error "No previous Nim token"))
+     ((init/nim--looking-back-at-token-char-p init/nim--delimiter-token-chars)
+      (backward-char 1))
+     ((save-excursion
+        (backward-char 1)
+        (looking-at-p "`"))
+      (backward-char 1))
+     ((save-excursion
+        (backward-char 1)
+        (looking-at-p "[[:alnum:]_]"))
+      (skip-chars-backward "[:alnum:]_"))
+     ((nth 3 (syntax-ppss))
+      (goto-char (nth 8 (syntax-ppss))))
+     ((save-excursion
+        (backward-char 1)
+        (looking-at-p "\"\\|'"))
+      (backward-sexp 1))
+     ((init/nim--looking-back-at-token-char-p init/nim--operator-token-chars)
+      (skip-chars-backward init/nim--operator-token-chars))
+     (t
+      (backward-char 1)))))
+
+(defun init/nim--move-token (arg)
+  "Move across ARG Nim lexical tokens."
+  (if (< arg 0)
+      (init/nim-backward-token (- arg))
+    (init/nim-forward-token arg)))
+
+(defun init/nim-mark-token (&optional arg allow-extend)
+  "Set mark ARG Nim lexical tokens from point, or extend active mark.
+This follows `mark-sexp' behavior: point stays anchored while mark moves.
+Repeated invocations extend the active region by one token at a time."
+  (interactive (list current-prefix-arg t))
+  (let* ((active (and allow-extend (region-active-p)))
+         (count (cond
+                 ((and active (null arg))
+                  (if (>= (mark) (point)) 1 -1))
+                 (t
+                  (prefix-numeric-value arg))))
+         (origin (if active (mark) (point)))
+         (target (save-excursion
+                   (goto-char origin)
+                   (init/nim--move-token count)
+                   (point))))
+    (set-mark target)
+    (setq mark-active t)
+    (activate-mark)))
+
 (defun init/nim-symbol-actions ()
   "Offer Nim navigation and documentation actions at point."
   (interactive)
@@ -358,6 +461,45 @@
   (or (init/nim--project-main-file)
       buffer-file-name))
 
+(defun init/nim--formatter-extension ()
+  "Return a Nim-like extension for temp formatter input."
+  (or (when buffer-file-name
+        (file-name-extension buffer-file-name t))
+      ".nim"))
+
+(defun init/nim-format-buffer ()
+  "Format the current Nim buffer with nph when it is installed."
+  (interactive)
+  (when-let ((nph (executable-find "nph")))
+    (let* ((source (make-temp-file "emacs-nph-" nil
+                                   (init/nim--formatter-extension)))
+           (output-buffer (generate-new-buffer " *nph output*"))
+           (coding-system-for-read buffer-file-coding-system)
+           (coding-system-for-write buffer-file-coding-system))
+      (unwind-protect
+          (progn
+            (write-region nil nil source nil 'silent)
+            (let ((status (call-process nph nil output-buffer nil source)))
+              (if (zerop status)
+                  (let ((formatted-buffer (generate-new-buffer " *nph formatted*")))
+                    (unwind-protect
+                        (progn
+                          (with-current-buffer formatted-buffer
+                            (insert-file-contents source))
+                          (replace-buffer-contents formatted-buffer))
+                      (kill-buffer formatted-buffer)))
+                (let ((message (with-current-buffer output-buffer
+                                 (string-trim (buffer-string)))))
+                  (display-warning
+                   'nim
+                   (if (string-empty-p message)
+                       (format "nph failed with exit status %s" status)
+                     message)
+                   :warning)))))
+        (when (file-exists-p source)
+          (delete-file source))
+        (kill-buffer output-buffer)))))
+
 (defun init/nim--warn-if-missing-tools ()
   "Warn when core Nim tools are not available."
   (unless (executable-find "nim")
@@ -401,6 +543,8 @@
     (flymake-mode -1))
   (when (fboundp 'flycheck-mode)
     (flycheck-mode 1))
+  (when (executable-find "nph")
+    (add-hook 'before-save-hook #'init/nim-format-buffer nil t))
   (add-hook 'after-save-hook #'init/nim--flycheck-buffer-after-save nil t)
   (when (bound-and-true-p flycheck-posframe-mode)
     (flycheck-posframe-mode -1))
@@ -410,10 +554,12 @@
   (local-set-key (kbd "C-c k") #'init/nim-hover-diagnostics)
   (local-set-key (kbd "C-c l d") #'init/nim-show-diagnostics)
   (local-set-key (kbd "C-c l a") #'init/nim-symbol-actions)
+  (local-set-key (kbd "C-c l f") #'init/nim-format-buffer)
   (local-set-key (kbd "<f5>") #'init/nim-run)
   (local-set-key (kbd "M-RET") #'init/nim-symbol-actions)
   (local-set-key (kbd "M-.") #'init/nim-goto-definition)
-  (local-set-key (kbd "M-,") #'xref-go-back))
+  (local-set-key (kbd "M-,") #'xref-go-back)
+  (local-set-key (kbd "C-M-SPC") #'init/nim-mark-token))
 
 (use-package nim-mode
   :mode ("\\.nim\\'" "\\.nims\\'" "\\.nimble\\'")

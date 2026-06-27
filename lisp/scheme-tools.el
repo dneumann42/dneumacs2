@@ -11,8 +11,6 @@
   (define-key paredit-mode-map (kbd "C-M-S-t")
               #'my/paredit-transpose-sexps-backward))
 
-(global-set-key (kbd "C-x z") #'repeat)
-
 (use-package geiser
   :ensure t
   :custom

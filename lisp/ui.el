@@ -1,5 +1,10 @@
 ;;; ui.el --- Core UI and editor defaults -*- lexical-binding: t; -*-
 
+(defvar init/frame-alpha-opaque 100)
+(defvar init/frame-alpha-translucent 85)
+(defvar init/compilation-frame nil
+  "Child frame showing the compilation buffer at top-right.")
+
 (defun configure-electric-pair-mode ()
   (setq electric-pair-pairs
         '((?\< . ?\>)
@@ -7,9 +12,6 @@
           (?\[ . ?\])
           (?\( . ?\))))
   (setq electric-pair-text-pairs electric-pair-pairs))
-
-(defvar init/frame-alpha-opaque 100)
-(defvar init/frame-alpha-translucent 85)
 
 (defun init/apply-frame-transparency (&optional frame)
   "Make FRAME use the configured translucent background alpha."
@@ -128,10 +130,6 @@
 (add-hook 'window-selection-change-functions
           #'init/evil-normalize-on-window-change)
 
-;;; Floating compilation panel — child frame at top-right
-
-(defvar init/compilation-frame nil
-  "Child frame showing the compilation buffer at top-right.")
 
 (defun init/display-compilation-in-child-frame (buffer alist)
   "Display BUFFER in a child frame at top-right of the current frame."
@@ -169,7 +167,6 @@
              '("\\*compilation\\*"
                (init/display-compilation-in-child-frame)))
 
-;; Restore focus to the original frame after compile finishes
 (defun init/compilation--restore-focus (&rest _)
   (when (and init/compilation-frame (frame-live-p init/compilation-frame))
     (let ((parent (frame-parent init/compilation-frame)))
@@ -204,6 +201,13 @@ If no compilation buffer exists, start a new compilation."
 
 (global-set-key (kbd "C-c c") #'init/compilation-toggle)
 (global-set-key (kbd "<f5>") #'compile)
+
+;; Navigation
+(global-set-key (kbd "M-n") 'forward-paragraph)
+(global-set-key (kbd "M-p") 'backward-paragraph)
+
+;; Editing
+(global-set-key (kbd "C-x z") #'repeat)
 
 (provide 'ui)
 ;;; ui.el ends here
