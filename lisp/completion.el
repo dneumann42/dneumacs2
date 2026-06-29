@@ -41,7 +41,12 @@
 
 (use-package consult
   :ensure t
-  :bind (("C-s" . consult-line)
+  :preface
+  (defun init/consult-line-repeat ()
+    "Search lines, initially reusing the most recent line search."
+    (interactive)
+    (consult-line (car consult--line-history)))
+  :bind (("C-s" . init/consult-line-repeat)
          ("C-c h" . consult-history)
          ("C-c m" . consult-mode-command)
          ("C-x /" . consult-ripgrep)

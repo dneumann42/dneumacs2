@@ -99,8 +99,8 @@
 
 (defun init/rust--treesit-ready-p ()
   "Return non-nil when Rust tree-sitter support is available."
-  (and (fboundp 'treesit-ready-p)
-       (treesit-ready-p 'rust)))
+  (and (fboundp 'treesit-language-available-p)
+       (treesit-language-available-p 'rust)))
 
 (when (and (fboundp 'rust-ts-mode)
            (init/rust--treesit-ready-p))

@@ -19,12 +19,12 @@ customizable."
   :type '(repeat string)
   :group 'init/owl)
 
-(defcustom init/owl-block-command-names '("if")
+(defcustom init/owl-block-command-names '("if" "fun")
   "Known Owl block commands to highlight and indent."
   :type '(repeat string)
   :group 'init/owl)
 
-(defconst init/owl--intro-keywords '("do" "then" "cond")
+(defconst init/owl--intro-keywords '("do" "then" "cond" "else" "end")
   "Owl block-intro keywords understood by the parser.")
 
 (defconst init/owl--symbol-regexp
@@ -125,12 +125,12 @@ customizable."
     (modify-syntax-entry ?_ "w" table)
     (dolist (ch '(?+ ?- ?* ?/ ?< ?= ?> ?! ??))
       (modify-syntax-entry ch "_" table))
-    (modify-syntax-entry ?\[ "(" table)
-    (modify-syntax-entry ?\] ")" table)
-    (modify-syntax-entry ?\{ "(" table)
-    (modify-syntax-entry ?\} ")" table)
-    (modify-syntax-entry ?\( "(" table)
-    (modify-syntax-entry ?\) ")" table)
+    (modify-syntax-entry ?\[ "(]" table)
+    (modify-syntax-entry ?\] ")[" table)
+    (modify-syntax-entry ?\{ "(}" table)
+    (modify-syntax-entry ?\} "){" table)
+    (modify-syntax-entry ?\( "()" table)
+    (modify-syntax-entry ?\) ")(" table)
     (modify-syntax-entry ?. "." table)
     (modify-syntax-entry ?: "." table)
     (modify-syntax-entry ?\; "." table)

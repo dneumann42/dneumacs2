@@ -178,7 +178,7 @@
      (t
       (user-error "Install utop or Tuareg REPL support to start an OCaml REPL")))))
 
-(global-set-key (kbd "C-c o u") #'init/ocaml-start-repl)
+(global-set-key (kbd bind/ocaml-start-repl) #'init/ocaml-start-repl)
 
 (defun init/ocaml-debug ()
   "Start an OCaml debugging session."

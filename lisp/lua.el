@@ -80,8 +80,8 @@
 
 (defun init/lua--treesit-ready-p ()
   "Return non-nil when Lua tree-sitter support is available."
-  (and (fboundp 'treesit-ready-p)
-       (treesit-ready-p 'lua)))
+  (and (fboundp 'treesit-language-available-p)
+       (treesit-language-available-p 'lua)))
 
 (when (and (fboundp 'lua-ts-mode)
            (init/lua--treesit-ready-p))

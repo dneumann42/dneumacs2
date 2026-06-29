@@ -1,14 +1,142 @@
 ;;; ui.el --- Core UI and editor defaults -*- lexical-binding: t; -*-
 
+(require 'cl-lib)
+(require 'subr-x)
+(require 'url)
+
 (defvar init/frame-alpha-opaque 100)
 (defvar init/frame-alpha-translucent 85)
-(defvar init/compilation-frame nil
-  "Child frame showing the compilation buffer at top-right.")
+(defvar init/compilation-frame nil)
+(defvar init/font-size 13)
+(defvar init/font-install-asked nil)
+(defvar init/pending-font-family nil)
+(defvar init/font-apply-retried nil)
+
+(defconst init/cascadia-font-url
+  "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/CascadiaCode.zip")
+(defconst init/cascadia-font-families
+  '("CaskaydiaCove Nerd Font Mono"
+    "CaskaydiaCove Nerd Font Propo"
+    "CaskaydiaCove Nerd Font"
+    "CaskaydiaCove NF"
+    "CaskaydiaCove"
+    "Cascadia Code Nerd Font Mono"
+    "Cascadia Code Nerd Font Propo"
+    "Cascadia Code Nerd Font"
+    "Cascadia Code NF"
+    "Cascadia Code"))
+(defconst init/cascadia-default-family "CaskaydiaCove Nerd Font Mono")
+(defconst init/iosevka-font-families
+  '("Iosevka NFM"
+    "Iosevka Nerd Font Mono"
+    "Iosevka Nerd Font"
+    "Iosevka"))
+(defun init/font-available-p (families)
+  "Return the first available font family from FAMILIES."
+  (cl-find-if (lambda (family)
+                (cl-find-if (lambda (installed)
+                              (string-match-p (regexp-quote family) installed))
+                            (font-family-list)))
+              families))
+
+(defun init/cascadia-font-installed-p ()
+  "Return non-nil when the Cascadia font files are present on disk."
+  (let ((font-dir (expand-file-name "~/.local/share/fonts/")))
+    (cl-some (lambda (pattern)
+               (file-expand-wildcards (expand-file-name pattern font-dir)))
+             '("CaskaydiaCoveNerdFont*.ttf"
+               "CaskaydiaCoveNerdFont*.otf"
+               "CascadiaCodeNerdFont*.ttf"
+               "CascadiaCodeNerdFont*.otf"))))
+
+(defun init/apply-font-family (family)
+  "Apply FAMILY as the default font for current and future frames."
+  (add-to-list 'default-frame-alist `(font . ,family))
+  (if (init/apply-font-family-now family)
+      (setq init/pending-font-family nil
+            init/font-apply-retried nil)
+    (setq init/pending-font-family family)
+    (unless init/font-apply-retried
+      (setq init/font-apply-retried t)
+      (run-at-time 1 nil #'init/apply-pending-font-family))
+    (message "Font not available yet, will retry once")))
+
+(defun init/apply-font-family-now (family)
+  "Try to apply FAMILY immediately. Return non-nil on success."
+  (condition-case err
+      (progn
+        (set-face-attribute 'default nil :family family :height (* init/font-size 10))
+        (set-face-attribute 'fixed-pitch nil :family family :height (* init/font-size 10))
+        t)
+    (error
+     (message "Font not available yet: %s" (error-message-string err))
+     nil)))
+
+(defun init/apply-pending-font-family ()
+  "Retry applying the most recently requested font family."
+  (when init/pending-font-family
+    (let ((family init/pending-font-family))
+      (setq init/pending-font-family nil)
+      (init/apply-font-family-now family))))
+
+(defun init/reset-font-cache ()
+  "Refresh Emacs and system font caches after a font install."
+  (when (fboundp 'clear-font-cache)
+    (clear-font-cache))
+  (when (eq system-type 'gnu/linux)
+    (let ((status (call-process "fc-cache" nil nil nil "-f" "-r")))
+      (unless (and (integerp status) (zerop status))
+        (message "Font cache refresh failed with status %s" status)))))
+
+(defun init/install-cascadia-font ()
+  "Download and install Cascadia Nerd Font into the user font directory."
+  (let* ((font-dir (expand-file-name "~/.local/share/fonts/"))
+         (zip-file (expand-file-name "CascadiaCode.zip" temporary-file-directory)))
+    (make-directory font-dir t)
+    (when (file-exists-p zip-file)
+      (delete-file zip-file))
+    (unless (zerop (call-process "curl" nil nil nil
+                                 "-L" "--fail" "--silent" "--show-error"
+                                 "--output" zip-file
+                                 init/cascadia-font-url))
+      (error "Failed to download Cascadia font"))
+    (unwind-protect
+        (progn
+          (unless (zerop (call-process "unzip" nil nil nil "-oq" zip-file "-d" font-dir))
+            (error "Failed to extract Cascadia font"))
+          (init/reset-font-cache)
+          t)
+      (when (file-exists-p zip-file)
+        (delete-file zip-file)))))
+
+(defun init/ensure-default-font ()
+  "Use Cascadia when available, or install it on Linux if requested."
+  (let ((family (or (init/font-available-p init/cascadia-font-families)
+                    (and (init/cascadia-font-installed-p)
+                         init/cascadia-default-family))))
+    (unless family
+      (when (and (eq system-type 'gnu/linux)
+                 (not init/font-install-asked))
+        (setq init/font-install-asked t)
+        (when (y-or-n-p "Cascadia font is missing. Download and install it? ")
+          (condition-case err
+              (progn
+                (init/install-cascadia-font)
+                (setq family (or (init/font-available-p init/cascadia-font-families)
+                                 (and (init/cascadia-font-installed-p)
+                                      init/cascadia-default-family))))
+            (error
+             (message "Cascadia font install failed: %s"
+                      (error-message-string err)))))))
+    (unless family
+      (setq family (init/font-available-p init/iosevka-font-families)))
+    (when family
+      (init/apply-font-family family))))
 
 (defun configure-electric-pair-mode ()
+  "Configure each grouping opener with its matching closer."
   (setq electric-pair-pairs
-        '((?\< . ?\>)
-          (?\{ . ?\})
+        '((?\{ . ?\})
           (?\[ . ?\])
           (?\( . ?\))))
   (setq electric-pair-text-pairs electric-pair-pairs))
@@ -38,12 +166,8 @@
      (message "Config reload failed: %s" (error-message-string err)))))
 
 (defun init/set-default-font ()
-  "Set the default UI font if available."
-  (let ((font "Iosevka NFM-13"))
-    (when (member "Iosevka NFM" (font-family-list))
-      (add-to-list 'default-frame-alist `(font . ,font))
-      (set-face-attribute 'default nil :font font)
-      (set-face-attribute 'fixed-pitch nil :font font))))
+  "Set the default UI font, installing Cascadia on Linux if requested."
+  (init/ensure-default-font))
 
 (defun init/git-repo-root (&optional dir)
   "Return the Git repository root for DIR, or nil if DIR is not in a repo."
@@ -56,6 +180,11 @@
     (when-let ((root (init/git-repo-root buffer-file-name)))
       (setq-local default-directory root))))
 
+(defun init/maybe-apply-pending-font (&optional _frame)
+  "Apply any pending font family if one exists."
+  (when init/pending-font-family
+    (init/apply-font-family-now init/pending-font-family)))
+
 (use-package emacs
   :ensure nil
   :init
@@ -66,6 +195,10 @@
   (scroll-bar-mode -1)
   (load-theme 'some-nice-colors t)
   (electric-pair-mode 1)
+  ;; Keep point near the window edge instead of recentering when wheel
+  ;; scrolling moves it outside the visible portion of the buffer.
+  (setq scroll-conservatively 101)
+  (setq scroll-preserve-screen-position 'always)
   (setq make-backup-files nil)
   (setq auto-save-default nil)
   (setq create-lockfiles nil)
@@ -73,9 +206,9 @@
   (add-to-list 'default-frame-alist
                `(alpha-background . ,init/frame-alpha-translucent))
   (init/set-default-font)
-  (global-set-key (kbd "C-c t") #'init/toggle-frame-transparency)
-  (global-set-key (kbd "C-c r") #'init/reload-config)
   (init/apply-frame-transparency)
+  (add-hook 'after-init-hook #'init/apply-pending-font-family)
+  (add-hook 'after-make-frame-functions #'init/maybe-apply-pending-font)
   :config
   (configure-electric-pair-mode)
   (global-auto-revert-mode 1)
@@ -87,7 +220,7 @@
 (use-package avy
   :ensure t
   :config
-  (global-set-key (kbd "C-:") 'avy-goto-char))
+  (global-set-key (kbd bind/avy-goto-char) 'avy-goto-char))
 
 (use-package ligature
   :config
@@ -199,15 +332,13 @@ If no compilation buffer exists, start a new compilation."
 
 (add-hook 'compilation-mode-hook #'init/compilation-mode-hook)
 
-(global-set-key (kbd "C-c c") #'init/compilation-toggle)
-(global-set-key (kbd "<f5>") #'compile)
+(global-set-key (kbd bind/toggle-frame-transparency) #'init/toggle-frame-transparency)
+(global-set-key (kbd bind/reload-config) #'init/reload-config)
+(global-set-key (kbd bind/compilation-toggle) #'init/compilation-toggle)
+(global-set-key (kbd bind/compile) #'compile)
+(global-set-key (kbd bind/forward-paragraph) 'forward-paragraph)
+(global-set-key (kbd bind/backward-paragraph) 'backward-paragraph)
+(global-set-key (kbd bind/repeat) #'repeat)
 
-;; Navigation
-(global-set-key (kbd "M-n") 'forward-paragraph)
-(global-set-key (kbd "M-p") 'backward-paragraph)
-
-;; Editing
-(global-set-key (kbd "C-x z") #'repeat)
-
-(provide 'ui)
+(provide 'editor)
 ;;; ui.el ends here
