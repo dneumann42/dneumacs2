@@ -39,6 +39,7 @@
    `(font-lock-constant-face ((t (:foreground ,teal))))
    `(font-lock-doc-face ((t (:foreground "#a7a7c8"))))
    `(font-lock-function-name-face ((t (:foreground ,blue :weight semi-bold))))
+   `(init/owl-function-name-face ((t (:foreground ,green :weight bold))))
    `(font-lock-keyword-face ((t (:foreground ,magenta :weight semi-bold))))
    `(font-lock-string-face ((t (:foreground ,green))))
    `(font-lock-type-face ((t (:foreground ,yellow))))

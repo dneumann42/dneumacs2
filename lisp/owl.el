@@ -7,10 +7,8 @@
   "Owl editing support."
   :group 'languages)
 
-(defcustom init/owl-indent-offset 2
-  "Indentation width used for Owl block bodies."
-  :type 'integer
-  :group 'init/owl)
+(defconst init/owl-indent-offset 4
+  "Indentation width used for Owl block bodies.")
 
 (defcustom init/owl-line-command-names '("def" "print")
   "Known Owl line commands to highlight.
@@ -27,6 +25,10 @@ customizable."
 (defconst init/owl--intro-keywords '("do" "then" "cond" "else" "end")
   "Owl block-intro keywords understood by the parser.")
 
+(defconst init/owl--language-keywords
+  '("true" "false" "set" "for" "while" "command")
+  "Owl literals and language keywords.")
+
 (defconst init/owl--symbol-regexp
   "[A-Za-z_+\\-*/<>=!?][A-Za-z0-9_+\\-*/<>=!?]*"
   "Regexp for Owl symbols and command heads.")
@@ -38,6 +40,32 @@ customizable."
 (defconst init/owl--keyword-regexp
   "\\_<:[A-Za-z_+\\-*/<>=!?][A-Za-z0-9_+\\-*/<>=!?]*\\_>"
   "Regexp for Owl keywords.")
+
+(defconst init/owl--operator-regexp
+  "[-+*/<>=!?]+"
+  "Regexp for Owl operators.")
+
+(defconst init/owl--delimiter-regexp
+  (regexp-opt '("(" ")" "[" "]" "{" "}" "<" ">"))
+  "Regexp matching Owl opening and closing delimiters.")
+
+(defconst init/owl--fun-name-regexp
+  (concat "\\_<fun\\_>[ \t]+\\(" init/owl--symbol-regexp "\\)[ \t]*\\[")
+  "Regexp matching the name in an Owl `fun NAME[...]' form.")
+
+(defface init/owl-function-name-face
+  '((((class color) (background dark))
+     (:foreground "#8be9a8" :weight bold))
+    (((class color) (background light))
+     (:foreground "#087830" :weight bold))
+    (t (:inherit font-lock-function-name-face :weight bold)))
+  "Face used for function identifiers in Owl `fun NAME[...]' forms."
+  :group 'init/owl)
+
+(defface init/owl-delimiter-face
+  '((t (:inherit font-lock-builtin-face :weight bold)))
+  "Face used for delimiters in Owl forms."
+  :group 'init/owl)
 
 (defun init/owl--command-names ()
   "Return the union of known Owl command names."
@@ -52,7 +80,7 @@ customizable."
 
 (defun init/owl--command-head-regexp ()
   "Return the regexp for a command head at the start of a form."
-  (concat "\\(?:\\`\\|^\\|[;\n]\\)[ \t]*\\("
+  (concat "\\(?:\\`\\|^\\|\n\\)[ \t]*\\("
           "\\_<"
           (regexp-opt (init/owl--command-names))
           "\\_>"
@@ -82,41 +110,59 @@ customizable."
                  "\\)\\_>[ \t]*\\(?:;.*\\)?\\'")
          line))))
 
-(defun init/owl--previous-code-line-indent ()
-  "Return the indentation of the previous nonblank Owl line."
+(defun init/owl--block-depth-before-line ()
+  "Return the open Owl block depth before the current line."
   (save-excursion
-    (let ((indent 0)
-          (found nil))
-      (while (and (not found) (not (bobp)))
-        (forward-line -1)
-        (unless (looking-at-p "^[ \t]*$")
-          (setq indent (current-indentation)
-                found t)))
-      indent)))
+    (let ((limit (line-beginning-position))
+          (depth 0))
+      (goto-char (point-min))
+      (while (< (point) limit)
+        (let ((line-end (line-end-position))
+              (elif-line (looking-at-p "^[ \t]*elif\\_>")))
+          (while (re-search-forward "\\_<\\(do\\|then\\|cond\\|end\\)\\_>" line-end t)
+            (let ((position (match-beginning 0))
+                  (token (match-string-no-properties 1)))
+              (unless (let ((state (save-excursion
+                                     (save-match-data (syntax-ppss position)))))
+                        (or (nth 3 state) (nth 4 state)))
+                (if (string= token "end")
+                    (setq depth (max 0 (1- depth)))
+                  (setq depth (1+ depth))))))
+          ;; `elif ... do' replaces the preceding branch rather than nesting
+          ;; another block inside it.
+          (when elif-line
+            (setq depth (max 0 (1- depth))))
+          (goto-char (min limit (1+ line-end)))))
+      depth)))
 
 (defun init/owl-indent-line ()
   "Indent the current Owl line."
   (interactive)
   (let* ((offset init/owl-indent-offset)
-         (save-point (- (point) (line-beginning-position)))
-         (indent
-          (save-excursion
-            (back-to-indentation)
-            (cond
-             ((bobp) 0)
-             ((looking-at-p "end\\_>")
-              (max 0 (- (init/owl--previous-code-line-indent) offset)))
-             (t
-              (let ((prev-indent (init/owl--previous-code-line-indent)))
-                (if (save-excursion
-                      (forward-line -1)
-                      (init/owl--line-opens-block-p))
-                    (+ prev-indent offset)
-                  prev-indent)))))))
+         (old-indent (current-indentation))
+         (text-column (max 0 (- (current-column) old-indent)))
+         (depth (init/owl--block-depth-before-line))
+         (closing (save-excursion
+                    (back-to-indentation)
+                    (looking-at-p "\\(?:else\\|elif\\|end\\)\\_>")))
+         (indent (* offset (max 0 (- depth (if closing 1 0))))))
     (indent-line-to indent)
-    (if (> save-point (current-indentation))
-        (goto-char (+ (line-beginning-position) (current-indentation)))
-      (goto-char (+ (line-beginning-position) save-point)))))
+    (move-to-column (+ indent text-column))))
+
+(defun init/owl-tab ()
+  "Insert spaces through the next Owl indentation column."
+  (interactive)
+  (let ((count (- init/owl-indent-offset
+                  (% (current-column) init/owl-indent-offset))))
+    (insert (make-string count ?\s))))
+
+(defun init/owl--electric-dedent ()
+  "Indent a closing Owl keyword immediately after it is typed."
+  (when (and (memq last-command-event '(?d ?e ?f))
+             (save-excursion
+               (beginning-of-line)
+               (looking-at-p "^[ \t]*\\(?:end\\|else\\|elif\\)[ \t]*$")))
+    (init/owl-indent-line)))
 
 (defvar init/owl-mode-syntax-table
   (let ((table (make-syntax-table prog-mode-syntax-table)))
@@ -133,7 +179,8 @@ customizable."
     (modify-syntax-entry ?\) ")(" table)
     (modify-syntax-entry ?. "." table)
     (modify-syntax-entry ?: "." table)
-    (modify-syntax-entry ?\; "." table)
+    (modify-syntax-entry ?\; "<" table)
+    (modify-syntax-entry ?\n ">" table)
     table)
   "Syntax table for `owl-mode'.")
 
@@ -143,10 +190,15 @@ customizable."
 (defun init/owl--font-lock-keywords ()
   "Build Owl font-lock keywords from the current command lists."
   (let ((intro (init/owl--intro-regexp))
-        (commands (regexp-opt (init/owl--command-names) 'symbols)))
+        (commands (regexp-opt (init/owl--command-names) 'symbols))
+        (language-keywords (regexp-opt init/owl--language-keywords 'symbols)))
     `((,intro . font-lock-keyword-face)
+      (,language-keywords . font-lock-keyword-face)
       (,init/owl--keyword-regexp . font-lock-constant-face)
       (,init/owl--number-regexp . font-lock-constant-face)
+      (,init/owl--fun-name-regexp 1 'init/owl-function-name-face)
+      (,init/owl--delimiter-regexp 0 'init/owl-delimiter-face)
+      (,init/owl--operator-regexp . font-lock-builtin-face)
       (init/owl--match-command-head 1 font-lock-function-name-face)
       (,(concat "\\_<\\(" commands "\\)\\_>") 1 font-lock-function-name-face))))
 
@@ -156,12 +208,14 @@ customizable."
   (setq-local font-lock-defaults '(init/owl-font-lock-keywords nil nil nil nil))
   (setq-local font-lock-multiline t)
   (setq-local indent-line-function #'init/owl-indent-line)
-  (setq-local comment-start nil)
-  (setq-local comment-end nil)
+  (setq-local comment-start "; ")
+  (setq-local comment-end "")
+  (setq-local comment-start-skip ";+\\s-*")
   (setq-local tab-width init/owl-indent-offset)
   (setq-local indent-tabs-mode nil)
   (setq-local electric-indent-chars
-              (append '(?\n ?\;) electric-indent-chars))
+              (cons ?\n (remove ?\; electric-indent-chars)))
+  (add-hook 'post-self-insert-hook #'init/owl--electric-dedent nil t)
   (setq-local imenu-generic-expression
               `(("Commands"
                  ,(concat "^\\s-*\\(" init/owl--symbol-regexp "\\)")
@@ -171,6 +225,8 @@ customizable."
   "Major mode for Owl source files."
   :syntax-table init/owl-mode-syntax-table
   (init/owl-setup))
+
+(define-key owl-mode-map (kbd "TAB") #'init/owl-tab)
 
 (add-to-list 'auto-mode-alist '("\\.owl\\'" . owl-mode))
 
