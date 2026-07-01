@@ -12,6 +12,7 @@
 (require 'editor)
 (require 'modeline)
 (require 'completion)
+(require 'init-org)
 (require 'init-markdown)
 (require 'scheme-tools)
 (require 'project-tools)
