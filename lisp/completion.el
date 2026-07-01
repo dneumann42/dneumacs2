@@ -24,8 +24,18 @@
   (corfu-auto t)
   (corfu-auto-prefix 3)
   (corfu-auto-delay 0.2)
+  (corfu-popupinfo-delay '(0.75 . 0.3))
   :init
-  (global-corfu-mode 1))
+  (global-corfu-mode 1)
+  :config
+  ;; Documentation popup next to the completion candidate.
+  (corfu-popupinfo-mode 1))
+
+;; Extra completion-at-point sources merged into Corfu.
+(use-package cape
+  :init
+  (add-hook 'completion-at-point-functions #'cape-file)
+  (add-hook 'completion-at-point-functions #'cape-dabbrev))
 
 (use-package orderless
   :ensure t
@@ -42,6 +52,10 @@
 (use-package consult
   :ensure t
   :preface
+  ;; Same name and initial value as consult's own defvar, so whichever
+  ;; loads first wins harmlessly.  Without this, the (car ...) below
+  ;; would be a void-variable error when consult is not yet loaded.
+  (defvar consult--line-history nil)
   (defun init/consult-line-repeat ()
     "Search lines, initially reusing the most recent line search."
     (interactive)
@@ -56,11 +70,6 @@
          ("M-g g" . consult-goto-line)
          ("M-g i" . consult-imenu)
          ("M-s r" . consult-ripgrep)))
-
-;; Embark warns if Consult is loaded and this integration is missing.
-;; Preload it when available so startup stays clean.
-(when (locate-library "embark-consult")
-  (require 'embark-consult nil t))
 
 (use-package embark
   :ensure t
@@ -82,16 +91,15 @@
   :hook ((text-mode
           prog-mode
           conf-mode
-          snippet-mode) . yas-minor-mode-on)
-  :config
-  (yas-global-mode 1))
+          snippet-mode) . yas-minor-mode-on))
 
 (use-package yasnippet-snippets
   :ensure t
   :after (yasnippet))
 
+;; which-key ships with Emacs 30; use the built-in copy.
 (use-package which-key
-  :ensure t
+  :ensure nil
   :commands (which-key-mode)
   :custom
   (which-key-idle-delay 0.35)

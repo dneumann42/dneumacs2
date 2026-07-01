@@ -18,6 +18,7 @@
 
 (use-package geiser
   :ensure t
+  :defer t
   :custom
   (geiser-active-implementations '(guile chicken))
   (geiser-repl-history-filename "~/.emacs.d/geiser-history"))
@@ -59,6 +60,14 @@
 (use-package paren-face
   :ensure t
   :hook (scheme-mode . paren-face-mode))
+
+(use-package rainbow-delimiters
+  :ensure t
+  :hook ((emacs-lisp-mode
+          lisp-mode
+          lisp-interaction-mode
+          scheme-mode
+          ielm-mode) . rainbow-delimiters-mode))
 
 ;;;; static-chicken integration
 

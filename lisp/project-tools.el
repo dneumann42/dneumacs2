@@ -7,8 +7,31 @@
   (define-key projectile-mode-map (kbd "s-p") 'projectile-command-map)
   (define-key projectile-mode-map (kbd "C-c p") 'projectile-command-map))
 
+(use-package magit
+  :bind (("C-x g" . magit-status)))
+
+;; Changed/added/removed line indicators in the fringe, kept in sync
+;; with Magit refreshes.
+(use-package diff-hl
+  :hook (((prog-mode conf-mode text-mode) . diff-hl-mode)
+         (magit-pre-refresh . diff-hl-magit-pre-refresh)
+         (magit-post-refresh . diff-hl-magit-post-refresh)))
+
+;; Per-project environments from .envrc via direnv.
+(use-package envrc
+  :if (executable-find "direnv")
+  :hook (after-init . envrc-global-mode))
+
+;; Editable grep buffers: embark-export or the pinned search buffer,
+;; then C-c C-p to edit matches in place and apply across files.
+(use-package wgrep
+  :after grep
+  :custom
+  (wgrep-auto-save-buffer t))
+
 (require 'transient)
-(require 'grep)
+;; `grep' is autoloaded; requiring it here would also pull in wgrep
+;; (:after grep) at startup.
 
 (declare-function consult-ripgrep "consult")
 (declare-function projectile-project-root "projectile")

@@ -107,7 +107,10 @@
 
 (init/nim--ensure-nimble-path)
 
-(require 'nim-suggest)
+;; nim-suggest requires nim-mode (plus the epc stack); loading it here
+;; would drag all of that in at startup even when no Nim file is opened.
+(with-eval-after-load 'nim-mode
+  (require 'nim-suggest))
 
 ;;;; Compilation output
 
@@ -679,11 +682,8 @@ case nimsuggest was installed or added to PATH afterwards."
     :modes (nim-mode)
     :working-directory init/nim--flycheck-working-directory))
 
-(use-package flycheck-posframe
-  :after flycheck
-  :hook (flycheck-mode . flycheck-posframe-mode)
-  :custom
-  (flycheck-posframe-position 'point-bottom-left-corner))
+;; flycheck-posframe is configured once in init-lsp.el; Nim buffers turn
+;; it off in `init/nim-setup' and use the custom hover popup instead.
 
 (defun init/nim-new-test ()
   "Create a new test file in the current Nimble project.

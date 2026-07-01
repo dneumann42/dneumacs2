@@ -180,7 +180,8 @@ Interactively, prompt with completion over the registered cheatsheets."
   '("Navigation"
     (init/ide-goto-definition "Jump to definition"        :in init/ide-mode-map)
     (init/ide-go-back         "Jump back"                 :in init/ide-mode-map)
-    (init/ide-hover           "Docs for symbol at point"  :in init/ide-mode-map))
+    (init/ide-hover           "Docs for symbol at point"  :in init/ide-mode-map)
+    (init/ide-project-symbols "Search symbols in project" :in init/ide-mode-map))
   '("Fixing code"
     (init/ide-actions     "Offer code actions"        :in init/ide-mode-map)
     (init/ide-fix         "Apply a quick fix"         :in init/ide-mode-map)
@@ -193,7 +194,8 @@ Interactively, prompt with completion over the registered cheatsheets."
     (init/ide-test-file    "Run the tests in this file"    :in init/ide-mode-map)
     (init/ide-test-project "Run the whole project's tests" :in init/ide-mode-map)
     (init/ide-repl         "Open the language REPL"        :in init/ide-mode-map)
-    (init/ide-sync         "Sync project / language server" :in init/ide-mode-map))
+    (init/ide-sync         "Sync project / language server" :in init/ide-mode-map)
+    (init/ide-debug        "Start a debugging session (DAP)" :in init/ide-mode-map))
   '("Notes"
     (:note "These work in language buffers (init/ide-mode).")
     (:note "The action taken adapts to the current language.")))

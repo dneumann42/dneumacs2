@@ -92,13 +92,10 @@
         ("C-x t M-t" . treemacs-find-tag)
         ("M-0"       . treemacs-select-window)))
 
-(use-package treemacs-evil
-  :after (treemacs evil)
-  :ensure t)
-
-(defvar treemacs-project-map (make-sparse-keymap)
-  "Fallback Treemacs project keymap, used until Treemacs initializes it.")
-
+;; Note: do NOT defvar `treemacs-project-map' here as a fallback.
+;; Treemacs defines it with a plain defvar in treemacs-mode.el, so a
+;; prior defvar wins and Treemacs would wire an empty keymap into its
+;; mode map, silently breaking every `p'-prefixed project command.
 (with-eval-after-load 'treemacs-mode
   (require 'treemacs-projectile nil t))
 

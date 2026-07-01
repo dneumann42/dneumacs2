@@ -17,8 +17,11 @@
     (let ((expanded (expand-file-name dir)))
       (when (file-directory-p expanded)
         (add-to-list 'exec-path expanded)
-        (setenv "PATH"
-                (concat expanded path-separator (or (getenv "PATH") "")))))))
+        (let ((paths (split-string (or (getenv "PATH") "") path-separator t)))
+          (unless (member expanded paths)
+            (setenv "PATH"
+                    (mapconcat #'identity (cons expanded paths)
+                               path-separator))))))))
 
 (init/add-user-bin-to-path)
 
@@ -53,8 +56,10 @@ Defaults to 7 days."
               86400.0)
            max-age))))
 
+;; Refresh asynchronously: a stale archive must not block startup on
+;; network I/O.  Freshly refreshed metadata is simply picked up next time.
 (when (init/package-archive-stale-p)
-  (package-refresh-contents))
+  (package-refresh-contents t))
 
 ;; If your Emacs does not already have use-package built in:
 (unless (package-installed-p 'use-package)

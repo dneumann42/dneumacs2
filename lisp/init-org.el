@@ -1,6 +1,8 @@
 ;;; init-org.el --- Org mode configuration -*- lexical-binding: t; -*-
 
-(require 'org)
+;; Org itself is deferred: the use-package block below autoloads it on
+;; the first Org buffer, agenda, or capture.  Everything at top level
+;; here must work without Org loaded.
 
 (defvar-local init/org--adding-parent-cookie nil
   "Non-nil while adding a TODO statistics cookie to a parent heading.")

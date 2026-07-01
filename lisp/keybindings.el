@@ -56,6 +56,10 @@
   "Key sequence for jumping to the definition at point.")
 (defconst bind/ide-go-back "M-,"
   "Key sequence for jumping back after a definition jump.")
+(defconst bind/ide-debug "<f9>"
+  "Key sequence for starting a debugging session.")
+(defconst bind/ide-project-symbols "M-g s"
+  "Key sequence for searching symbols across the project.")
 
 ;;;; Language-specific IDE actions
 ;; Extra commands that have no generic equivalent, bound in their own
@@ -92,6 +96,8 @@
     (define-key map (kbd bind/ide-sync) #'init/ide-sync)
     (define-key map (kbd bind/ide-goto-definition) #'init/ide-goto-definition)
     (define-key map (kbd bind/ide-go-back) #'init/ide-go-back)
+    (define-key map (kbd bind/ide-debug) #'init/ide-debug)
+    (define-key map (kbd bind/ide-project-symbols) #'init/ide-project-symbols)
     map)
   "Keymap of common IDE actions shared by all language buffers.")
 

@@ -11,6 +11,7 @@
 
 (use-package sly
   :ensure t
+  :defer t
   :custom
   (inferior-lisp-program "sbcl")
   :config

@@ -7,6 +7,8 @@ eln-cache/
 # Emacs cache and auto-save
 .cache/
 auto-save-list/
+auto-saves/
+backups/
 
 # Backup files
 *~
@@ -40,3 +42,9 @@ custom.el
 
 # Backup init file
 init.el~
+
+# Save-place history
+places
+
+# Recentf history
+recentf

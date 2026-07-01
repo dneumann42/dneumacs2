@@ -10,22 +10,30 @@
   (when (file-directory-p opam-site-lisp)
     (add-to-list 'load-path opam-site-lisp))
   (when (file-directory-p opam-bin)
-    (setenv "PATH" (concat opam-bin path-separator (getenv "PATH")))
-    (add-to-list 'exec-path opam-bin)))
+    (add-to-list 'exec-path opam-bin)
+    (let ((paths (split-string (or (getenv "PATH") "") path-separator t)))
+      (unless (member opam-bin paths)
+        (setenv "PATH" (concat opam-bin path-separator (getenv "PATH")))))))
+
+(defvar init/ocaml--opam-env-applied nil
+  "Non-nil once the opam environment has been imported this session.")
 
 (defun init/ocaml--apply-opam-env ()
-  "Import the current opam switch environment into Emacs."
-  (when (executable-find "opam")
-    (dolist (line (split-string
-                   (shell-command-to-string "opam env --switch default --shell=sh")
-                   "\n" t))
-      (when (string-match
-             "^\\([A-Z0-9_]+\\)='\\(.*\\)'; export \\1;$" line)
-        (setenv (match-string 1 line) (match-string 2 line))))))
+  "Import the current opam switch environment into Emacs, once.
+Runs `opam env' in a subprocess, so it is deferred to the first OCaml
+buffer instead of costing every startup."
+  (unless init/ocaml--opam-env-applied
+    (setq init/ocaml--opam-env-applied t)
+    (when (executable-find "opam")
+      (dolist (line (split-string
+                     (shell-command-to-string "opam env --switch default --shell=sh")
+                     "\n" t))
+        (when (string-match
+               "^\\([A-Z0-9_]+\\)='\\(.*\\)'; export \\1;$" line)
+          (setenv (match-string 1 line) (match-string 2 line)))))))
 
-(init/ocaml--apply-opam-env)
-
-(require 'ocp-indent nil 'noerror)
+(with-eval-after-load 'tuareg
+  (require 'ocp-indent nil 'noerror))
 
 (add-to-list 'display-buffer-alist
              '("\\*utop\\*"
@@ -159,6 +167,7 @@
 
 (defun init/ocaml-setup ()
   "Set up OCaml editing, LSP and buffer-local keybindings."
+  (init/ocaml--apply-opam-env)
   (init/ide--warn-missing-server init/ocaml-lsp-server-command
                                  "Install ocaml-lsp-server for OCaml LSP support.")
   (when (fboundp 'eglot-ensure)

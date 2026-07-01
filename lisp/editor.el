@@ -360,10 +360,32 @@ under lisp/ from `features' first makes those requires re-load in order."
   ;; scrolling moves it outside the visible portion of the buffer.
   (setq scroll-conservatively 101)
   (setq scroll-preserve-screen-position 'always)
-  (setq make-backup-files nil)
-  (setq auto-save-default nil)
+  ;; Keep backups and auto-saves as a safety net, but out of working trees.
+  (setq backup-directory-alist
+        `(("." . ,(expand-file-name "backups" user-emacs-directory)))
+        backup-by-copying t
+        version-control t
+        delete-old-versions t
+        kept-new-versions 6
+        kept-old-versions 2)
+  (setq auto-save-file-name-transforms
+        `((".*" ,(expand-file-name "auto-saves/" user-emacs-directory) t)))
+  (make-directory (expand-file-name "auto-saves" user-emacs-directory) t)
   (setq create-lockfiles nil)
   (setq auto-revert-verbose nil)
+  (setq use-short-answers t)
+  (setq kill-do-not-save-duplicates t)
+  (setq require-final-newline t)
+  (setq xref-search-program 'ripgrep)
+  (delete-selection-mode 1)
+  (when (fboundp 'pixel-scroll-precision-mode)
+    (pixel-scroll-precision-mode 1))
+  (global-so-long-mode 1)
+  (repeat-mode 1)
+  (context-menu-mode 1)
+  (save-place-mode 1)
+  (add-hook 'prog-mode-hook #'display-line-numbers-mode)
+  (add-hook 'prog-mode-hook #'hl-line-mode)
   (add-to-list 'default-frame-alist
                `(alpha-background . ,init/frame-alpha-translucent))
   (init/set-default-font)
@@ -375,13 +397,31 @@ under lisp/ from `features' first makes those requires re-load in order."
   (global-auto-revert-mode 1)
   (add-hook 'find-file-hook #'init/set-default-directory-to-git-root))
 
+(use-package recentf
+  :ensure nil
+  :custom
+  (recentf-max-saved-items 300)
+  (recentf-exclude
+   (list (regexp-quote (expand-file-name "elpa/" user-emacs-directory))
+         (regexp-quote (expand-file-name "eln-cache/" user-emacs-directory))))
+  :init
+  (recentf-mode 1))
+
 (use-package ace-window
   :bind (("C-0" . ace-window)))
 
 (use-package avy
-  :ensure t
+  :defer t
+  :init
+  (global-set-key (kbd bind/avy-goto-char) #'avy-goto-char))
+
+;; Prefer tree-sitter major modes and offer to install missing grammars.
+(use-package treesit-auto
+  :custom
+  (treesit-auto-install 'prompt)
   :config
-  (global-set-key (kbd bind/avy-goto-char) 'avy-goto-char))
+  (treesit-auto-add-to-auto-mode-alist 'all)
+  (global-treesit-auto-mode))
 
 (use-package ligature
   :config
@@ -411,20 +451,6 @@ under lisp/ from `features' first makes those requires re-load in order."
   (set-face-foreground 'highlight-indent-guides-character-face "#2a2a36")
   (set-face-foreground 'highlight-indent-guides-top-character-face "#5d6aa8")
   (set-face-foreground 'highlight-indent-guides-stack-character-face "#8a6a9f"))
-
-;; Keep Evil out of sticky non-edit states after window/workspace changes.
-(defun init/evil-normalize-on-window-change (&rest _)
-  "Return the newly selected window to Evil normal state when appropriate.
-Skips the minibuffer and Treemacs so their own bindings keep working."
-  (when (and (fboundp 'evil-normal-state)
-             (bound-and-true-p evil-local-mode)
-             (not (minibufferp))
-             (not (eq major-mode 'treemacs-mode))
-             (not (active-minibuffer-window)))
-    (evil-normal-state)))
-
-(add-hook 'window-selection-change-functions
-          #'init/evil-normalize-on-window-change)
 
 ;;;; Compilation panel
 

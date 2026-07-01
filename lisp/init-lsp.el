@@ -63,6 +63,11 @@ Intended for use in `before-save-hook'."
   :ensure nil
   :commands (eglot eglot-ensure eglot-code-actions eglot-reconnect
                    eglot-format-buffer)
+  :custom
+  ;; Kill servers with no remaining buffers, and skip event logging
+  ;; (a large hidden buffer rewritten on every LSP message).
+  (eglot-autoshutdown t)
+  (eglot-events-buffer-config '(:size 0 :format full))
   :config
   (add-to-list 'eglot-server-programs
                '((c-mode c++-mode c-ts-mode c++-ts-mode) . ("clangd")))
@@ -86,11 +91,28 @@ Intended for use in `before-save-hook'."
   :after (flycheck eglot)
   :hook (eglot-managed-mode . flycheck-eglot-mode))
 
+;; The single flycheck-posframe configuration; nim.el used to declare a
+;; second one with a conflicting position, and last-loaded silently won.
 (use-package flycheck-posframe
   :after flycheck
   :hook (flycheck-mode . flycheck-posframe-mode)
   :custom
   (flycheck-posframe-position 'window-bottom-left-corner))
+
+;; Hover documentation in a childframe at point instead of the echo area.
+(use-package eldoc-box
+  :defer t)
+
+;; Project-wide symbol search through the language server.
+(use-package consult-eglot
+  :defer t)
+
+;; DAP debugging (debugpy, codelldb, gdb, ...) on top of the same
+;; server configs Eglot uses.
+(use-package dape
+  :defer t
+  :custom
+  (dape-buffer-window-arrangement 'right))
 
 ;;;; Generic IDE command dispatch
 
@@ -116,6 +138,7 @@ Intended for use in `before-save-hook'."
 (defun init/ide--default-hover ()
   "Show documentation for the symbol at point."
   (cond
+   ((fboundp 'eldoc-box-help-at-point) (eldoc-box-help-at-point))
    ((fboundp 'eglot-help-at-point) (eglot-help-at-point))
    ((fboundp 'eldoc-print-current-symbol-info)
     (eldoc-print-current-symbol-info))
@@ -190,6 +213,8 @@ the buffer-local `init/ide-NAME-function' is nil."
 (init/define-ide-command sync            "sync"              nil)
 (init/define-ide-command goto-definition "go to definition"  #'xref-find-definitions)
 (init/define-ide-command go-back         "go back"           #'xref-go-back)
+(init/define-ide-command debug           "debugger"          #'dape)
+(init/define-ide-command project-symbols "project symbols"   #'consult-eglot-symbols)
 
 ;;;; which-key labels for the common set
 
