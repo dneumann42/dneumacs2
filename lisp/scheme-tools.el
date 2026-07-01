@@ -3,13 +3,18 @@
 (require 'seq)
 (require 'cl-lib)
 
+;;;; Paredit
+
 (defun my/paredit-transpose-sexps-backward ()
+  "Transpose the sexp before point with the one before it."
   (interactive)
   (transpose-sexps -1))
 
 (with-eval-after-load 'paredit
   (define-key paredit-mode-map (kbd "C-M-S-t")
               #'my/paredit-transpose-sexps-backward))
+
+;;;; Geiser and package setup
 
 (use-package geiser
   :ensure t
@@ -55,12 +60,15 @@
   :ensure t
   :hook (scheme-mode . paren-face-mode))
 
+;;;; static-chicken integration
+
 ;; static-chicken: load the editor helper shipped with a static-chicken app
 ;; whenever we open a .scm file inside one. Walks up from the buffer file
 ;; looking for vendor/static-chicken/editor/static-chicken.el; if found,
 ;; loads it and turns on static-chicken-mode (binds C-c C-c to save +
 ;; reload via the app's TCP REPL).
 (defun my/static-chicken-maybe-enable ()
+  "Load and enable static-chicken support when inside such a project."
   (when buffer-file-name
     (when-let* ((root (locate-dominating-file
                        buffer-file-name
@@ -76,11 +84,13 @@
           (static-chicken-mode 1))))))
 
 (defun my/static-chicken-repl-buffer-p (buffer)
+  "Return non-nil when BUFFER is a static-chicken or Geiser REPL buffer."
   (string-match-p
    "\\`\\*\\(?:static-chicken-repl\\|Geiser.*REPL\\).*\\*"
    (buffer-name buffer)))
 
 (defun my/static-chicken-clean-stale-repl-buffers (keep)
+  "Kill dead static-chicken REPL buffers, except the buffer KEEP."
   (dolist (buffer (buffer-list))
     (when (and (not (eq buffer keep))
                (my/static-chicken-repl-buffer-p buffer)
@@ -88,15 +98,18 @@
       (kill-buffer buffer))))
 
 (defun my/static-chicken-live-repl-buffer ()
+  "Return a static-chicken REPL buffer with a live process, or nil."
   (seq-find
    (lambda (buffer)
      (and (my/static-chicken-repl-buffer-p buffer)
           (process-live-p (get-buffer-process buffer))))
    (buffer-list)))
 
-(defconst my/static-chicken-repl-frame-name "static-chicken REPL")
+(defconst my/static-chicken-repl-frame-name "static-chicken REPL"
+  "Name given to the dedicated static-chicken REPL frame.")
 
 (defun my/static-chicken-repl-frame ()
+  "Return the dedicated static-chicken REPL frame, or nil."
   (seq-find
    (lambda (frame)
      (frame-parameter frame 'my/static-chicken-repl-frame))
@@ -142,6 +155,9 @@
        buffer))))
 
 (defun my/static-chicken-install-repl-reuse ()
+  "Advise `static-chicken-connect-repl' to reuse a live REPL frame.
+Installed once; reconnecting reuses an existing REPL buffer and its
+dedicated frame instead of spawning a duplicate."
   (when (and (featurep 'static-chicken)
              (not (get 'my/static-chicken-install-repl-reuse 'installed)))
     (put 'my/static-chicken-install-repl-reuse 'installed t)
@@ -162,7 +178,7 @@
                         (my/static-chicken-pop-to-repl-frame buffer-or-name))))
              (apply orig args))))))))
 
-;; ── g-golf / Guile GTK live coding ──────────────────────────
+;;;; g-golf / Guile GTK live coding
 
 (defcustom my/g-golf-guile-repl-port 37146
   "TCP port for the running G-Golf Guile REPL server."
@@ -200,9 +216,12 @@ Looks for a .envrc containing \"g-golf\" when walking up from DIR."
     (user-error "No Geiser REPL connected. Use C-c C-g first")))
 
 (defun my/g-golf-install-override ()
-  "Buffer-local override of C-c C-c in geiser-mode-map for g-golf projects."
+  "Buffer-local override of C-c C-c in `geiser-mode-map' for g-golf projects."
   (when (my/g-golf-project-root)
-    (make-local-variable 'geiser-mode-map)
+    ;; `make-local-variable' alone leaves the shared keymap object in place,
+    ;; so `define-key' would mutate it for every buffer.  Copy first so the
+    ;; rebinding is truly buffer-local.
+    (setq-local geiser-mode-map (copy-keymap geiser-mode-map))
     (define-key geiser-mode-map (kbd "C-c C-c") #'my/g-golf-reload)))
 
 (defun my/g-golf-maybe-enable ()
@@ -211,8 +230,22 @@ Binds C-c C-g to connect,  C-c C-c to reload UI (via geiser-mode-hook)."
   (when (and buffer-file-name (my/g-golf-project-root))
     (local-set-key (kbd "C-c C-g") #'my/g-golf-guile-connect)))
 
+;;;; Shared IDE keymap
+
+(defun init/scheme-ide-setup ()
+  "Enable the shared IDE keymap in Scheme buffers, mapped to Geiser."
+  (setq-local init/ide-hover-function #'geiser-doc-symbol-at-point
+              init/ide-actions-function #'geiser-eval-definition
+              init/ide-run-function #'geiser-eval-buffer
+              init/ide-repl-function #'geiser-mode-switch-to-repl
+              init/ide-goto-definition-function #'geiser-edit-symbol-at-point)
+  (init/ide-mode 1))
+
+;;;; Hooks
+
 (add-hook 'scheme-mode-hook #'my/static-chicken-maybe-enable)
 (add-hook 'scheme-mode-hook #'my/g-golf-maybe-enable)
+(add-hook 'scheme-mode-hook #'init/scheme-ide-setup)
 (add-hook 'geiser-mode-hook #'my/g-golf-install-override)
 
 (provide 'scheme-tools)

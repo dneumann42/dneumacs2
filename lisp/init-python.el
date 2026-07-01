@@ -7,26 +7,14 @@
 (require 'subr-x)
 (require 'which-func)
 
-(declare-function eglot-code-actions "eglot")
 (declare-function eglot-ensure "eglot")
-(declare-function eglot-help-at-point "eglot")
-(declare-function eglot-reconnect "eglot")
 (declare-function flycheck-list-errors "flycheck")
 (declare-function flycheck-mode "flycheck")
 
-(defgroup init/python nil
-  "Python development with uv."
-  :group 'languages)
+;; `init/python-uv-command' and `init/python-language-server' are defined
+;; centrally in init-lsp.el, which configures the language server.
 
-(defcustom init/python-uv-command "uv"
-  "Command used to run uv."
-  :type 'string
-  :group 'init/python)
-
-(defcustom init/python-language-server "basedpyright-langserver"
-  "Language server executable installed in the uv environment."
-  :type 'string
-  :group 'init/python)
+;;;; Project and command helpers
 
 (defun init/python-project-root ()
   "Return the current Python project root."
@@ -49,6 +37,8 @@
   "Run uv with ARGUMENTS from the Python project root."
   (let ((default-directory (init/python-project-root)))
     (compile (apply #'init/python--uv-command arguments))))
+
+;;;; Interactive commands
 
 (defun init/python-sync ()
   "Synchronize the current project's uv environment."
@@ -141,6 +131,8 @@
       (flycheck-list-errors)
     (flymake-show-buffer-diagnostics)))
 
+;;;; Buffer setup and package configuration
+
 (defun init/python-setup ()
   "Enable the Python IDE features in the current buffer."
   (setq-local indent-tabs-mode nil
@@ -163,31 +155,21 @@
   (when (fboundp 'flycheck-mode)
     (flycheck-mode 1))
   (add-hook 'before-save-hook #'init/python-format-buffer-on-save nil t)
-  (local-set-key (kbd bind/ide-run) #'init/python-run-file)
-  (local-set-key (kbd bind/ide-test-at-point) #'init/python-test-at-point)
-  (local-set-key (kbd bind/ide-test-file) #'init/python-test-file)
-  (local-set-key (kbd bind/ide-test-project) #'init/python-test-project)
-  (local-set-key (kbd bind/ide-actions) #'eglot-code-actions)
-  (local-set-key (kbd bind/ide-hover) #'eglot-help-at-point)
-  (local-set-key (kbd bind/ide-diagnostics) #'init/python-show-diagnostics)
-  (local-set-key (kbd bind/ide-reconnect) #'eglot-reconnect)
-  (local-set-key (kbd bind/ide-format) #'init/python-format-buffer)
-  (local-set-key (kbd bind/ide-fix) #'init/python-ruff-fix)
-  (local-set-key (kbd bind/ide-repl) #'init/python-repl)
-  (local-set-key (kbd bind/ide-sync) #'init/python-sync))
+  ;; Hover, code actions and reconnect use the shared Eglot defaults.
+  (setq-local init/ide-run-function #'init/python-run-file
+              init/ide-test-at-point-function #'init/python-test-at-point
+              init/ide-test-file-function #'init/python-test-file
+              init/ide-test-project-function #'init/python-test-project
+              init/ide-diagnostics-function #'init/python-show-diagnostics
+              init/ide-format-function #'init/python-format-buffer
+              init/ide-fix-function #'init/python-ruff-fix
+              init/ide-repl-function #'init/python-repl
+              init/ide-sync-function #'init/python-sync)
+  (init/ide-mode 1))
 
 (use-package python
   :ensure nil
   :hook ((python-mode python-ts-mode) . init/python-setup))
-
-(use-package eglot
-  :ensure nil
-  :commands (eglot eglot-ensure eglot-code-actions)
-  :config
-  (add-to-list 'eglot-server-programs
-               `((python-mode python-ts-mode)
-                 . (,init/python-uv-command "run"
-                    ,init/python-language-server "--stdio"))))
 
 (provide 'init-python)
 ;;; init-python.el ends here

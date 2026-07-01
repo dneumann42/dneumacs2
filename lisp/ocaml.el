@@ -3,6 +3,8 @@
 (require 'subr-x)
 (require 'comint)
 
+;;;; Opam environment
+
 (let ((opam-site-lisp (expand-file-name "~/.opam/default/share/emacs/site-lisp"))
       (opam-bin (expand-file-name "~/.opam/default/bin")))
   (when (file-directory-p opam-site-lisp)
@@ -29,14 +31,13 @@
              '("\\*utop\\*"
                (display-buffer-same-window)))
 
+;;;; Customization
+
 (defgroup init/ocaml nil
   "OCaml editing support."
   :group 'languages)
 
-(defcustom init/ocaml-lsp-server-command "ocamllsp"
-  "Command used to start the OCaml LSP server."
-  :type 'string
-  :group 'init/ocaml)
+;; `init/ocaml-lsp-server-command' is defined centrally in init-lsp.el.
 
 (defcustom init/ocaml-utop-command "utop"
   "Command used to start the OCaml REPL."
@@ -48,6 +49,8 @@
   :type 'string
   :group 'init/ocaml)
 
+;;;; Project and LSP helpers
+
 (defun init/ocaml-project-root (&optional dir)
   "Return the OCaml project root for DIR, or `default-directory'."
   (or (when (fboundp 'project-current)
@@ -58,39 +61,8 @@
         root)
       default-directory))
 
-(defun init/ocaml--server-missing-warning ()
-  "Warn if `ocamllsp' is not available in PATH."
-  (unless (executable-find init/ocaml-lsp-server-command)
-    (display-warning
-     'ocaml
-     (format "%s not found in PATH. Install ocaml-lsp-server for LSP support."
-             init/ocaml-lsp-server-command)
-     :warning)))
-
-(defun init/ocaml-hover-doc ()
-  "Show documentation for the symbol at point."
-  (interactive)
-  (cond
-   ((fboundp 'eglot-help-at-point)
-    (eglot-help-at-point))
-   ((fboundp 'eldoc-print-current-symbol-info)
-    (eldoc-print-current-symbol-info))
-   (t
-    (message "No hover documentation command available."))))
-
-(defun init/ocaml-show-diagnostics ()
-  "Show diagnostics at point."
-  (interactive)
-  (cond
-   ((fboundp 'flycheck-list-errors)
-    (flycheck-list-errors))
-   ((fboundp 'flymake-show-diagnostics-buffer)
-    (flymake-show-diagnostics-buffer))
-   (t
-    (message "No diagnostics UI available."))))
-
 (defun init/ocaml-code-actions ()
-  "Offer OCaml code actions and refactorings."
+  "Offer OCaml code actions and refactorings, preferring quick fixes."
   (interactive)
   (cond
    ((fboundp 'eglot-code-action-quickfix)
@@ -100,21 +72,7 @@
    (t
     (message "No code action command available."))))
 
-(defun init/ocaml-format-buffer ()
-  "Format the current buffer via Eglot when managed by LSP."
-  (when (and (fboundp 'eglot-managed-p)
-             (eglot-managed-p)
-             (fboundp 'eglot-format-buffer))
-    (eglot-format-buffer)))
-
-(defun init/ocaml-reconnect ()
-  "Reconnect the OCaml LSP server for the current buffer."
-  (interactive)
-  (if (and (fboundp 'eglot-current-server)
-           (eglot-current-server)
-           (fboundp 'eglot-reconnect))
-      (eglot-reconnect (eglot-current-server))
-    (message "No active Eglot server to reconnect.")))
+;;;; Build, test and REPL
 
 (defun init/ocaml-build ()
   "Run `dune build' from the current OCaml project."
@@ -197,36 +155,37 @@
      (t
       (user-error "Install ocamldebug or Tuareg debugger support to debug OCaml programs")))))
 
+;;;; Mode setup and keybindings
+
 (defun init/ocaml-setup ()
   "Set up OCaml editing, LSP and buffer-local keybindings."
-  (init/ocaml--server-missing-warning)
+  (init/ide--warn-missing-server init/ocaml-lsp-server-command
+                                 "Install ocaml-lsp-server for OCaml LSP support.")
   (when (fboundp 'eglot-ensure)
     (eglot-ensure))
-  (add-hook 'before-save-hook #'init/ocaml-format-buffer nil t)
-  (local-set-key (kbd "C-c l h") #'init/ocaml-hover-doc)
-  (local-set-key (kbd "C-c l a") #'init/ocaml-code-actions)
-  (local-set-key (kbd "C-c l d") #'init/ocaml-show-diagnostics)
-  (local-set-key (kbd "C-c l r") #'init/ocaml-reconnect)
-  (local-set-key (kbd "C-c l f") #'init/ocaml-format-buffer)
-  (local-set-key (kbd "C-c o u") #'init/ocaml-start-repl)
-  (local-set-key (kbd "C-c o b") #'init/ocaml-build)
-  (local-set-key (kbd "C-c o t") #'init/ocaml-test)
-  (local-set-key (kbd "C-c o d") #'init/ocaml-debug)
-  (local-set-key (kbd "C-c o ?") #'init/ocaml-show-keybindings)
-  (local-set-key (kbd "M-RET") #'init/ocaml-code-actions)
-  (local-set-key (kbd "M-.") #'xref-find-definitions)
-  (local-set-key (kbd "M-,") #'xref-go-back))
+  (add-hook 'before-save-hook #'init/ide-eglot-format-on-save nil t)
+  ;; Hover, diagnostics, reconnect and format use the shared defaults.
+  (setq-local init/ide-actions-function #'init/ocaml-code-actions
+              init/ide-repl-function #'init/ocaml-start-repl
+              init/ide-test-project-function #'init/ocaml-test
+              init/ide-sync-function #'init/ocaml-build)
+  (init/ide-mode 1)
+  ;; OCaml-specific extras with no generic equivalent.
+  (local-set-key (kbd bind/ocaml-build) #'init/ocaml-build)
+  (local-set-key (kbd bind/ocaml-test) #'init/ocaml-test)
+  (local-set-key (kbd bind/ocaml-debug) #'init/ocaml-debug)
+  (local-set-key (kbd bind/ocaml-help) #'init/ocaml-show-keybindings))
 
 (defun init/ocaml-show-keybindings ()
   "Show the OCaml keybindings for the current buffer."
   (interactive)
   (with-help-window "*OCaml Keys*"
     (princ "OCaml buffer keys\n\n")
-    (princ "C-c l h  hover documentation\n")
-    (princ "C-c l a  code actions / refactors\n")
-    (princ "C-c l d  diagnostics\n")
-    (princ "C-c l r  reconnect Eglot\n")
-    (princ "C-c l f  format buffer\n")
+    (princ "C-c h    hover documentation\n")
+    (princ "C-c d    diagnostics\n")
+    (princ "C-c r    reconnect Eglot\n")
+    (princ "C-c f    format buffer\n")
+    (princ "M-RET    code actions / refactors\n")
     (princ "M-.      go to definition\n")
     (princ "M-,      go back\n\n")
     (princ "C-c o u  start or switch to utop\n")
@@ -234,6 +193,8 @@
     (princ "C-c o t  dune test\n")
     (princ "C-c o d  debugger\n")
     (princ "C-c o ?  this help buffer\n")))
+
+;;;; Packages
 
 (use-package tuareg
   :ensure t
@@ -246,21 +207,8 @@
   (tuareg-indent-align-with-first-arg nil)
   (tuareg-indent-ellipsis t))
 
-(use-package eglot
-  :ensure nil
-  :commands (eglot eglot-ensure eglot-code-actions)
-  :config
-  (add-to-list 'eglot-server-programs
-               `((tuareg-mode) . (,init/ocaml-lsp-server-command))))
-
 (with-eval-after-load 'which-key
   (which-key-add-key-based-replacements
-    "C-c l" "lsp"
-    "C-c l h" "hover doc"
-    "C-c l a" "code actions"
-    "C-c l d" "diagnostics"
-    "C-c l r" "restart lsp"
-    "C-c l f" "format buffer"
     "C-c o" "ocaml"
     "C-c o u" "utop repl"
     "C-c o b" "dune build"

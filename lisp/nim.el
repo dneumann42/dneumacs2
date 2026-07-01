@@ -1,5 +1,15 @@
 ;;; nim.el --- Nim language support -*- lexical-binding: t; -*-
 
+;;; Commentary:
+
+;; Nim editing support: project scaffolding, nimsuggest integration,
+;; Flycheck-based diagnostics with hover popups, token-based motion
+;; commands, nph formatting, and run/test helpers.
+
+;;; Code:
+
+;;;; Requirements and forward declarations
+
 (require 'cl-lib)
 (require 'subr-x)
 (require 'compile)
@@ -14,6 +24,8 @@
 (declare-function flycheck-error-end-line "flycheck")
 (declare-function flycheck-error-level-error-list-face "flycheck")
 (declare-function project-root "project")
+
+;;;; Paths and project detection
 
 (defconst init/nim-nimble-bin (expand-file-name "~/.nimble/bin")
   "Directory where nimble installs user binaries.")
@@ -97,6 +109,8 @@
 
 (require 'nim-suggest)
 
+;;;; Compilation output
+
 (require 'ansi-color)
 
 (defun init/nim--colorize-compilation-output ()
@@ -105,6 +119,8 @@
     (ansi-color-apply-on-region compilation-filter-start (point))))
 
 (add-hook 'compilation-filter-hook #'init/nim--colorize-compilation-output)
+
+;;;; Hover popups
 
 (defconst init/nim-hover-buffer-name "*Nim hover*"
   "Name of the buffer used for Nim hover popups.")
@@ -173,6 +189,8 @@
         (or (not (buffer-live-p source-buffer))
             (not (eq (current-buffer) source-buffer))
             (/= (point) source-point))))))
+
+;;;; Diagnostics
 
 (defun init/nim--diagnostics-at-point ()
   "Return Flycheck diagnostics at point, sorted by severity."
@@ -244,6 +262,8 @@
     (font-lock-ensure)
     (buffer-substring (point-min) (point-max))))
 
+;;;; Nimsuggest and Flycheck configuration
+
 (defun init/nim--project-search-paths (&optional dir)
   "Return likely search paths for a Nim project under DIR."
   (when-let ((root (init/nim--nimble-root dir)))
@@ -273,6 +293,8 @@
   (when (and (derived-mode-p 'nim-mode)
              (bound-and-true-p flycheck-mode))
     (flycheck-buffer)))
+
+;;;; Interactive commands: documentation and navigation
 
 (defun init/nim-hover-doc ()
   "Show documentation for symbol at point."
@@ -312,10 +334,13 @@
    (t
     (message "No definition backend available."))))
 
+;;;; Token motion
+
 (defconst init/nim--operator-token-chars "+-*/\\=<>@$~&%|!?^.:"
   "Characters that form Nim operator tokens.")
 
-(defconst init/nim--delimiter-token-chars "()[]{};,")
+(defconst init/nim--delimiter-token-chars "()[]{};,"
+  "Characters that form single-character Nim delimiter tokens.")
 
 (defun init/nim--forward-comment (&optional count)
   "Move across whitespace and comments in direction COUNT."
@@ -461,6 +486,8 @@ Repeated invocations extend the active region by one token at a time."
   (or (init/nim--project-main-file)
       buffer-file-name))
 
+;;;; Formatting, running, and tools
+
 (defun init/nim--formatter-extension ()
   "Return a Nim-like extension for temp formatter input."
   (or (when buffer-file-name
@@ -533,6 +560,8 @@ Repeated invocations extend the active region by one token at a time."
   (let ((default-directory (init/nim-project-root)))
     (compile "nimble run")))
 
+;;;; Buffer setup and package configuration
+
 (defun init/nim-setup ()
   "Set up Nim editing, diagnostics and navigation in current buffer."
   (init/nim--ensure-project-scaffold)
@@ -551,15 +580,15 @@ Repeated invocations extend the active region by one token at a time."
   (setq-local flycheck-display-errors-function #'init/nim--show-diagnostic-hover)
   (setq-local flycheck-clear-displayed-errors-function #'init/nim--hide-hover-buffer)
   (init/nim--enable-nimsuggest)
-  (local-set-key (kbd "C-c k") #'init/nim-hover-diagnostics)
-  (local-set-key (kbd "C-c l d") #'init/nim-show-diagnostics)
-  (local-set-key (kbd "C-c l a") #'init/nim-symbol-actions)
-  (local-set-key (kbd "C-c l f") #'init/nim-format-buffer)
-  (local-set-key (kbd "<f5>") #'init/nim-run)
-  (local-set-key (kbd "M-RET") #'init/nim-symbol-actions)
-  (local-set-key (kbd "M-.") #'init/nim-goto-definition)
-  (local-set-key (kbd "M-,") #'xref-go-back)
-  (local-set-key (kbd "C-M-SPC") #'init/nim-mark-token))
+  ;; Nim uses nimsuggest, not Eglot, so it overrides most IDE actions.
+  (setq-local init/ide-hover-function #'init/nim-hover-diagnostics
+              init/ide-diagnostics-function #'init/nim-show-diagnostics
+              init/ide-actions-function #'init/nim-symbol-actions
+              init/ide-format-function #'init/nim-format-buffer
+              init/ide-run-function #'init/nim-run
+              init/ide-goto-definition-function #'init/nim-goto-definition)
+  (init/ide-mode 1)
+  (local-set-key (kbd bind/nim-mark-token) #'init/nim-mark-token))
 
 (use-package nim-mode
   :mode ("\\.nim\\'" "\\.nims\\'" "\\.nimble\\'")

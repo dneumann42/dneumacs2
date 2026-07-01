@@ -1,31 +1,104 @@
 ;;; keybindings.el --- Keybindings -*- lexical-binding: t; -*-
 
-(defconst bind/avy-goto-char "C-:")
-(defconst bind/ocaml-start-repl "C-c o u")
+(defconst bind/avy-goto-char "C-:"
+  "Key sequence for jumping to a character with Avy.")
+(defconst bind/ocaml-start-repl "C-c o u"
+  "Key sequence for starting the OCaml REPL.")
 
-;; Editor
-(defconst bind/toggle-frame-transparency "C-c t")
-(defconst bind/toggle-menu-bar "C-c M")
-(defconst bind/reload-config "C-c r")
-(defconst bind/compilation-toggle "C-c c")
-(defconst bind/compile "<f5>")
-(defconst bind/forward-paragraph "M-n")
-(defconst bind/backward-paragraph "M-p")
-(defconst bind/repeat "C-x z")
+;;;; Editor
+(defconst bind/toggle-frame-transparency "C-c t"
+  "Key sequence for toggling frame transparency.")
+(defconst bind/toggle-menu-bar "C-c M"
+  "Key sequence for toggling the menu bar.")
+(defconst bind/reload-config "C-c r"
+  "Key sequence for reloading the Emacs configuration.")
+(defconst bind/compilation-toggle "C-c c"
+  "Key sequence for toggling the compilation buffer.")
+(defconst bind/compile "<f5>"
+  "Key sequence for starting a compilation.")
+(defconst bind/forward-paragraph "M-n"
+  "Key sequence for moving forward one paragraph.")
+(defconst bind/backward-paragraph "M-p"
+  "Key sequence for moving backward one paragraph.")
+(defconst bind/repeat "C-x z"
+  "Key sequence for repeating the last command.")
 
-;; Language IDE actions: at most two key events each.
-(defconst bind/ide-run "<f5>")
-(defconst bind/ide-test-at-point "<f6>")
-(defconst bind/ide-test-file "<S-f6>")
-(defconst bind/ide-test-project "<f7>")
-(defconst bind/ide-actions "M-RET")
-(defconst bind/ide-hover "C-c h")
-(defconst bind/ide-diagnostics "C-c d")
-(defconst bind/ide-reconnect "C-c r")
-(defconst bind/ide-format "C-c f")
-(defconst bind/ide-fix "C-c x")
-(defconst bind/ide-repl "C-c z")
-(defconst bind/ide-sync "C-c s")
+;;;; Language IDE actions
+;; Each IDE binding is at most two key events. These are bound locally in
+;; language buffers, so overlaps with global editor bindings are intentional.
+(defconst bind/ide-run "<f5>"
+  "Key sequence for running the current program.")
+(defconst bind/ide-test-at-point "<f6>"
+  "Key sequence for running the test at point.")
+(defconst bind/ide-test-file "<S-f6>"
+  "Key sequence for running the tests in the current file.")
+(defconst bind/ide-test-project "<f7>"
+  "Key sequence for running the whole project's tests.")
+(defconst bind/ide-actions "M-RET"
+  "Key sequence for invoking available code actions.")
+(defconst bind/ide-hover "C-c h"
+  "Key sequence for showing hover documentation.")
+(defconst bind/ide-diagnostics "C-c d"
+  "Key sequence for listing buffer diagnostics.")
+(defconst bind/ide-reconnect "C-c r"
+  "Key sequence for reconnecting the language server.")
+(defconst bind/ide-format "C-c f"
+  "Key sequence for formatting the current buffer.")
+(defconst bind/ide-fix "C-c x"
+  "Key sequence for applying an automatic fix.")
+(defconst bind/ide-repl "C-c z"
+  "Key sequence for opening the language REPL.")
+(defconst bind/ide-sync "C-c s"
+  "Key sequence for syncing the project or language server.")
+(defconst bind/ide-goto-definition "M-."
+  "Key sequence for jumping to the definition at point.")
+(defconst bind/ide-go-back "M-,"
+  "Key sequence for jumping back after a definition jump.")
+
+;;;; Language-specific IDE actions
+;; Extra commands that have no generic equivalent, bound in their own
+;; language buffers on top of the shared IDE keymap.
+(defconst bind/ocaml-build "C-c o b"
+  "Key sequence for `dune build' in OCaml buffers.")
+(defconst bind/ocaml-test "C-c o t"
+  "Key sequence for `dune test' in OCaml buffers.")
+(defconst bind/ocaml-debug "C-c o d"
+  "Key sequence for starting the OCaml debugger.")
+(defconst bind/ocaml-help "C-c o ?"
+  "Key sequence for the OCaml keybinding help buffer.")
+(defconst bind/nim-mark-token "C-M-SPC"
+  "Key sequence for marking the Nim token at point.")
+
+;;;; Shared IDE minor mode
+;; The common command layer lives in init-lsp.el; the commands are bound
+;; here so every key sequence is defined in one file.  Keymaps may
+;; reference commands that are defined later, so load order is fine.
+
+(defvar init/ide-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd bind/ide-run) #'init/ide-run)
+    (define-key map (kbd bind/ide-test-at-point) #'init/ide-test-at-point)
+    (define-key map (kbd bind/ide-test-file) #'init/ide-test-file)
+    (define-key map (kbd bind/ide-test-project) #'init/ide-test-project)
+    (define-key map (kbd bind/ide-actions) #'init/ide-actions)
+    (define-key map (kbd bind/ide-hover) #'init/ide-hover)
+    (define-key map (kbd bind/ide-diagnostics) #'init/ide-diagnostics)
+    (define-key map (kbd bind/ide-reconnect) #'init/ide-reconnect)
+    (define-key map (kbd bind/ide-format) #'init/ide-format)
+    (define-key map (kbd bind/ide-fix) #'init/ide-fix)
+    (define-key map (kbd bind/ide-repl) #'init/ide-repl)
+    (define-key map (kbd bind/ide-sync) #'init/ide-sync)
+    (define-key map (kbd bind/ide-goto-definition) #'init/ide-goto-definition)
+    (define-key map (kbd bind/ide-go-back) #'init/ide-go-back)
+    map)
+  "Keymap of common IDE actions shared by all language buffers.")
+
+(define-minor-mode init/ide-mode
+  "Provide a common set of IDE keybindings in language buffers.
+Commands dispatch to buffer-local overrides set by each language, or to
+a shared default (see init-lsp.el)."
+  :lighter " IDE"
+  :keymap init/ide-mode-map)
 
 (provide 'keybindings)
 ;;; keybindings.el ends here

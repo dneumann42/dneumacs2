@@ -14,6 +14,7 @@
 (require 'completion)
 (require 'init-org)
 (require 'init-markdown)
+(require 'init-lsp)
 (require 'scheme-tools)
 (require 'project-tools)
 (require 'c-tools)

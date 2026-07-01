@@ -3,6 +3,8 @@
 (require 'cl-lib)
 (require 'subr-x)
 
+;;;; Customization
+
 (defgroup init/owl nil
   "Owl editing support."
   :group 'languages)
@@ -29,8 +31,13 @@ customizable."
   '("true" "false" "set" "for" "while" "command")
   "Owl literals and language keywords.")
 
+;;;; Regexps and faces
+
 (defconst init/owl--symbol-regexp
-  "[A-Za-z_+\\-*/<>=!?][A-Za-z0-9_+\\-*/<>=!?]*"
+  ;; The hyphen must sit at the end of each class to be a literal member;
+  ;; the previous "\\-" form neither matched "-" nor "*", so hyphenated
+  ;; symbols such as "list-tail" were never recognized.
+  "[A-Za-z_+*/<>=!?-][A-Za-z0-9_+*/<>=!?-]*"
   "Regexp for Owl symbols and command heads.")
 
 (defconst init/owl--number-regexp
@@ -38,7 +45,7 @@ customizable."
   "Regexp for Owl numbers.")
 
 (defconst init/owl--keyword-regexp
-  "\\_<:[A-Za-z_+\\-*/<>=!?][A-Za-z0-9_+\\-*/<>=!?]*\\_>"
+  "\\_<:[A-Za-z_+*/<>=!?-][A-Za-z0-9_+*/<>=!?-]*\\_>"
   "Regexp for Owl keywords.")
 
 (defconst init/owl--operator-regexp
@@ -66,6 +73,8 @@ customizable."
   '((t (:inherit font-lock-builtin-face :weight bold)))
   "Face used for delimiters in Owl forms."
   :group 'init/owl)
+
+;;;; Command and block detection
 
 (defun init/owl--command-names ()
   "Return the union of known Owl command names."
@@ -135,6 +144,8 @@ customizable."
           (goto-char (min limit (1+ line-end)))))
       depth)))
 
+;;;; Indentation
+
 (defun init/owl-indent-line ()
   "Indent the current Owl line."
   (interactive)
@@ -163,6 +174,8 @@ customizable."
                (beginning-of-line)
                (looking-at-p "^[ \t]*\\(?:end\\|else\\|elif\\)[ \t]*$")))
     (init/owl-indent-line)))
+
+;;;; Syntax table and font-lock
 
 (defvar init/owl-mode-syntax-table
   (let ((table (make-syntax-table prog-mode-syntax-table)))
@@ -201,6 +214,8 @@ customizable."
       (,init/owl--operator-regexp . font-lock-builtin-face)
       (init/owl--match-command-head 1 font-lock-function-name-face)
       (,(concat "\\_<\\(" commands "\\)\\_>") 1 font-lock-function-name-face))))
+
+;;;; Major mode
 
 (defun init/owl-setup ()
   "Configure Owl editing defaults for the current buffer."

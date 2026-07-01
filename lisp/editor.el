@@ -1,19 +1,31 @@
-;;; ui.el --- Core UI and editor defaults -*- lexical-binding: t; -*-
+;;; editor.el --- Core UI and editor defaults -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
 (require 'subr-x)
 (require 'url)
 
-(defvar init/frame-alpha-opaque 100)
-(defvar init/frame-alpha-translucent 85)
-(defvar init/compilation-frame nil)
-(defvar init/font-size 13)
-(defvar init/font-install-asked nil)
-(defvar init/pending-font-family nil)
-(defvar init/font-apply-retried nil)
+;;;; State variables
+
+(defvar init/frame-alpha-opaque 100
+  "Alpha-background value representing a fully opaque frame.")
+(defvar init/frame-alpha-translucent 85
+  "Alpha-background value used for translucent frames.")
+(defvar init/compilation-frame nil
+  "The live child frame displaying the compilation buffer, or nil.")
+(defvar init/font-size 13
+  "Default font size in points for the UI font.")
+(defvar init/font-install-asked nil
+  "Non-nil once the user has been asked to install the Cascadia font.")
+(defvar init/pending-font-family nil
+  "Font family awaiting application once a graphical frame is ready.")
+(defvar init/font-apply-retried nil
+  "Non-nil once a deferred font application has been scheduled.")
+
+;;;; Fonts
 
 (defconst init/cascadia-font-url
-  "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/CascadiaCode.zip")
+  "https://github.com/ryanoasis/nerd-fonts/releases/download/v3.4.0/CascadiaCode.zip"
+  "Download URL for the Cascadia Code Nerd Font archive.")
 (defconst init/cascadia-font-families
   '("CaskaydiaCove Nerd Font Mono"
     "CaskaydiaCove Nerd Font Propo"
@@ -24,13 +36,16 @@
     "Cascadia Code Nerd Font Propo"
     "Cascadia Code Nerd Font"
     "Cascadia Code NF"
-    "Cascadia Code"))
-(defconst init/cascadia-default-family "CaskaydiaCove Nerd Font Mono")
+    "Cascadia Code")
+  "Family names to probe for an installed Cascadia Nerd Font.")
+(defconst init/cascadia-default-family "CaskaydiaCove Nerd Font Mono"
+  "Preferred Cascadia family name to use once the font is installed.")
 (defconst init/iosevka-font-families
   '("Iosevka NFM"
     "Iosevka Nerd Font Mono"
     "Iosevka Nerd Font"
-    "Iosevka"))
+    "Iosevka")
+  "Family names to probe for an installed Iosevka font as a fallback.")
 (defun init/font-available-p (families)
   "Return the first available font family from FAMILIES."
   (cl-find-if (lambda (family)
@@ -133,6 +148,8 @@
     (when family
       (init/apply-font-family family))))
 
+;;;; Electric pairs
+
 (defun configure-electric-pair-mode ()
   "Configure each grouping opener with its matching closer."
   (setq electric-pair-pairs
@@ -140,6 +157,8 @@
           (?\[ . ?\])
           (?\( . ?\))))
   (setq electric-pair-text-pairs electric-pair-pairs))
+
+;;;; Frame transparency
 
 (defun init/apply-frame-transparency (&optional frame)
   "Make FRAME use the configured translucent background alpha."
@@ -154,6 +173,8 @@
                  init/frame-alpha-opaque)))
     (set-frame-parameter nil 'alpha-background next)
     (message "Frame transparency: %s%%" next)))
+
+;;;; Menu bar
 
 (defvar init/menu-bar-auto-modes '(org-mode)
   "Major modes for which the menu bar is shown automatically.")
@@ -198,6 +219,8 @@ configured in `init/menu-bar-auto-modes'."
                 map))
   "Clickable modeline segment that toggles the menu bar.")
 
+;;;; Misc editor commands and helpers
+
 (defun init/reload-config ()
   "Reload the full Emacs configuration from `user-init-file'."
   (interactive)
@@ -227,6 +250,8 @@ configured in `init/menu-bar-auto-modes'."
   "Apply any pending font family if one exists."
   (when init/pending-font-family
     (init/apply-font-family-now init/pending-font-family)))
+
+;;;; Package configuration
 
 (use-package emacs
   :ensure nil
@@ -296,6 +321,8 @@ configured in `init/menu-bar-auto-modes'."
 
 ;; Keep Evil out of sticky non-edit states after window/workspace changes.
 (defun init/evil-normalize-on-window-change (&rest _)
+  "Return the newly selected window to Evil normal state when appropriate.
+Skips the minibuffer and Treemacs so their own bindings keep working."
   (when (and (fboundp 'evil-normal-state)
              (bound-and-true-p evil-local-mode)
              (not (minibufferp))
@@ -306,9 +333,12 @@ configured in `init/menu-bar-auto-modes'."
 (add-hook 'window-selection-change-functions
           #'init/evil-normalize-on-window-change)
 
+;;;; Compilation panel
 
 (defun init/display-compilation-in-child-frame (buffer alist)
-  "Display BUFFER in a child frame at top-right of the current frame."
+  "Display BUFFER in a child frame at top-right of the current frame.
+ALIST is the `display-buffer' action alist; it is accepted for
+protocol compatibility but not otherwise used."
   (condition-case err
       (progn
         (when (and init/compilation-frame (frame-live-p init/compilation-frame))
@@ -344,6 +374,7 @@ configured in `init/menu-bar-auto-modes'."
                (init/display-compilation-in-child-frame)))
 
 (defun init/compilation--restore-focus (&rest _)
+  "Return input focus to the parent frame after starting a compilation."
   (when (and init/compilation-frame (frame-live-p init/compilation-frame))
     (let ((parent (frame-parent init/compilation-frame)))
       (when (and parent (frame-live-p parent))
@@ -375,6 +406,8 @@ If no compilation buffer exists, start a new compilation."
 
 (add-hook 'compilation-mode-hook #'init/compilation-mode-hook)
 
+;;;; Menu bar activation
+
 ;; Menu bar: hidden by default, shown automatically in Org buffers, and
 ;; toggleable via keybinding or the clickable modeline segment.
 (unless (member init/menu-bar-modeline-button global-mode-string)
@@ -382,6 +415,8 @@ If no compilation buffer exists, start a new compilation."
         (append global-mode-string (list init/menu-bar-modeline-button))))
 (add-hook 'window-selection-change-functions #'init/menu-bar-refresh)
 (add-hook 'window-buffer-change-functions #'init/menu-bar-refresh)
+
+;;;; Keybindings
 
 (global-set-key (kbd bind/toggle-menu-bar) #'init/toggle-menu-bar)
 (global-set-key (kbd bind/toggle-frame-transparency) #'init/toggle-frame-transparency)
@@ -393,4 +428,4 @@ If no compilation buffer exists, start a new compilation."
 (global-set-key (kbd bind/repeat) #'repeat)
 
 (provide 'editor)
-;;; ui.el ends here
+;;; editor.el ends here

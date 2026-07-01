@@ -19,12 +19,17 @@
   (setq sly-lisp-implementations
         '((sbcl ("sbcl" "--dynamic-space-size" "4096")))))
 
-(defconst my/alatar-repl-frame-name "alatar REPL")
+;;;; Alatar REPL frame management
+
+(defconst my/alatar-repl-frame-name "alatar REPL"
+  "Name given to the dedicated Alatar SLY REPL frame.")
 
 (defun my/alatar-repl-buffer-p (buffer)
+  "Return non-nil when BUFFER is a SLY mREPL buffer."
   (string-match-p "\\`\\*sly-mrepl" (buffer-name buffer)))
 
 (defun my/alatar-live-repl-buffer ()
+  "Return a SLY mREPL buffer with a live process, or nil."
   (seq-find
    (lambda (buffer)
      (and (my/alatar-repl-buffer-p buffer)
@@ -32,6 +37,7 @@
    (buffer-list)))
 
 (defun my/alatar-repl-frame ()
+  "Return the dedicated Alatar REPL frame, or nil."
   (seq-find
    (lambda (frame)
      (frame-parameter frame 'my/alatar-repl-frame))
@@ -77,11 +83,16 @@
        buffer))))
 
 (defun my/alatar-wrap-repl-display (orig display-action)
+  "Advice for `sly-mrepl' routing display to the Alatar REPL frame.
+ORIG is the wrapped function; DISPLAY-ACTION is ignored in favour of
+`my/alatar-pop-to-repl-frame'."
   (funcall orig
            (lambda (buffer)
              (my/alatar-pop-to-repl-frame buffer))))
 
 (defun my/alatar-wrap-repl-create (orig &rest args)
+  "Advice for `sly-mrepl-new' popping the new REPL into the Alatar frame.
+ORIG is the wrapped function and ARGS its arguments."
   (cl-letf (((symbol-function 'pop-to-buffer)
              (lambda (buffer-or-name &optional _action _norecord)
                (my/alatar-pop-to-repl-frame buffer-or-name))))
@@ -93,8 +104,10 @@
     (advice-add 'sly-mrepl :around #'my/alatar-wrap-repl-display)
     (advice-add 'sly-mrepl-new :around #'my/alatar-wrap-repl-create)))
 
+;;;; REPL structural editing
+
 ;; Structural editing in the SLY REPL too (file buffers are covered by
-;; the lisp-mode paredit hook in init-scheme.el).
+;; the lisp-mode paredit hook in scheme-tools.el).
 (defun init/sly-mrepl-paredit ()
   "Enable paredit in the SLY REPL, keeping RET as submit.
 paredit >= 25 binds RET in its minor-mode map, which shadows the
@@ -109,6 +122,21 @@ via `minor-mode-overriding-map-alist'."
 
 (with-eval-after-load 'sly-mrepl
   (add-hook 'sly-mrepl-mode-hook #'init/sly-mrepl-paredit))
+
+;;;; Shared IDE keymap
+
+(defun init/lisp-ide-setup ()
+  "Enable the shared IDE keymap in Common Lisp buffers, mapped to SLY."
+  (setq-local init/ide-hover-function #'sly-describe-symbol
+              init/ide-actions-function #'sly-eval-defun
+              init/ide-run-function #'sly-eval-buffer
+              init/ide-repl-function #'sly-mrepl
+              init/ide-diagnostics-function #'sly-goto-first-note
+              init/ide-goto-definition-function #'sly-edit-definition
+              init/ide-go-back-function #'sly-pop-find-definition-stack)
+  (init/ide-mode 1))
+
+(add-hook 'lisp-mode-hook #'init/lisp-ide-setup)
 
 (provide 'init-common-lisp)
 ;;; init-common-lisp.el ends here
