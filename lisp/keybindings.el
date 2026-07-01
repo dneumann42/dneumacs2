@@ -12,7 +12,9 @@
   "Key sequence for toggling the menu bar.")
 (defconst bind/reload-config "C-c r"
   "Key sequence for reloading the Emacs configuration.")
-(defconst bind/compilation-toggle "C-c c"
+(defconst bind/cheatsheet "C-c g"
+  "Key sequence for opening a cheatsheet (guide).")
+(defconst bind/compilation-toggle "C-c b"
   "Key sequence for toggling the compilation buffer.")
 (defconst bind/compile "<f5>"
   "Key sequence for starting a compilation.")

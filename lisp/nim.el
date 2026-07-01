@@ -322,17 +322,61 @@
   (init/nim--show-hover-buffer
    (init/nim--format-diagnostics-at-point errors)))
 
+(defvar init/nim-goto-definition-timeout 6.0
+  "Seconds to wait for nimsuggest to answer a definition query.
+Generous enough to cover a cold nimsuggest server start.")
+
+(defun init/nim--suggest-def-locations ()
+  "Query nimsuggest for the definition at point.
+Return a list of `nim--epc' structs, or nil.  Wait up to
+`init/nim-goto-definition-timeout' seconds, re-issuing the request while
+the server progresses from not-started through connecting to ready."
+  (let ((buffer (current-buffer))
+        (deadline (+ (float-time) init/nim-goto-definition-timeout))
+        (result 'pending)
+        (last-issue 0.0))
+    (while (and (eq result 'pending) (< (float-time) deadline))
+      ;; Re-issue periodically: a query made while the server is merely
+      ;; `connecting' schedules no callback, so we must ask again once it
+      ;; becomes `ready'.
+      (when (> (- (float-time) last-issue) 0.3)
+        (setq last-issue (float-time))
+        (ignore-errors
+          (nimsuggest--call-epc
+           'def
+           (lambda (defs)
+             (when (buffer-live-p buffer)
+               (with-current-buffer buffer
+                 (setq result defs)))))))
+      (sleep-for 0.05))
+    (and (not (eq result 'pending)) result)))
+
 (defun init/nim-goto-definition ()
-  "Jump to the definition at point with the most reliable backend available."
+  "Jump to the definition of the symbol at point using nimsuggest.
+Ensures nimsuggest is discovered and running, queries it directly, and
+pushes the xref marker stack so \\[xref-go-back] returns here."
   (interactive)
-  (cond
-   ((and (fboundp 'nimsuggest-find-definition)
-         (bound-and-true-p nimsuggest-mode))
-    (call-interactively #'nimsuggest-find-definition))
-   ((fboundp 'xref-find-definitions)
-    (call-interactively #'xref-find-definitions))
-   (t
-    (message "No definition backend available."))))
+  (unless buffer-file-name
+    (user-error "Buffer is not visiting a file; nimsuggest needs a file"))
+  (init/nim--enable-nimsuggest)
+  (unless (and (fboundp 'nimsuggest-available-p) (nimsuggest-available-p))
+    (user-error "nimsuggest not found; install it (e.g. `nimble install nimsuggest') and reopen this file"))
+  (let ((defs (init/nim--suggest-def-locations)))
+    (unless defs
+      (user-error "nimsuggest found no definition here (if the server was just starting, try again)"))
+    (let* ((def (car defs))
+           (file (nim--epc-file def))
+           (line (nim--epc-line def))
+           (column (nim--epc-column def)))
+      (unless (and file (file-exists-p file))
+        (user-error "nimsuggest returned no valid file for the definition"))
+      (xref-push-marker-stack)
+      (find-file file)
+      (goto-char (point-min))
+      (when (natnump line)
+        (forward-line (1- line)))
+      (when (natnump column)
+        (move-to-column column)))))
 
 ;;;; Token motion
 
@@ -534,12 +578,33 @@ Repeated invocations extend the active region by one token at a time."
   (unless (executable-find "nimsuggest")
     (display-warning 'nim "nimsuggest not found in PATH; definition and hover will be limited" :warning)))
 
+(defun init/nim--ensure-nimsuggest-path ()
+  "Point `nimsuggest-path' at an executable nimsuggest when one exists.
+The variable is computed once when nim-suggest loads, so re-detect it in
+case nimsuggest was installed or added to PATH afterwards."
+  (unless (and (boundp 'nimsuggest-path)
+               nimsuggest-path
+               (file-executable-p nimsuggest-path))
+    (init/nim--ensure-nimble-path)
+    (when-let ((path (executable-find "nimsuggest")))
+      (setq nimsuggest-path path))))
+
 (defun init/nim--enable-nimsuggest ()
-  "Enable nimsuggest when the binary is available."
+  "Discover nimsuggest and enable `nimsuggest-mode' in the current buffer."
+  (init/nim--ensure-nimsuggest-path)
   (setq-local nimsuggest-local-options (init/nim--nimsuggest-local-options))
   (when (and (fboundp 'nimsuggest-available-p)
-             (nimsuggest-available-p))
+             (nimsuggest-available-p)
+             (not (bound-and-true-p nimsuggest-mode)))
     (nimsuggest-mode 1)))
+
+(defun init/nim--prewarm-nimsuggest ()
+  "Start the nimsuggest server early so the first jump is responsive."
+  (when (and buffer-file-name
+             (fboundp 'nimsuggest-available-p)
+             (nimsuggest-available-p))
+    (ignore-errors
+      (nimsuggest--call-epc 'sug #'ignore))))
 
 (defun init/nim--hide-hover-buffer ()
   "Hide the Nim hover popup if it is visible."
@@ -580,6 +645,7 @@ Repeated invocations extend the active region by one token at a time."
   (setq-local flycheck-display-errors-function #'init/nim--show-diagnostic-hover)
   (setq-local flycheck-clear-displayed-errors-function #'init/nim--hide-hover-buffer)
   (init/nim--enable-nimsuggest)
+  (init/nim--prewarm-nimsuggest)
   ;; Nim uses nimsuggest, not Eglot, so it overrides most IDE actions.
   (setq-local init/ide-hover-function #'init/nim-hover-diagnostics
               init/ide-diagnostics-function #'init/nim-show-diagnostics

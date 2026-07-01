@@ -13,6 +13,7 @@
 (require 'modeline)
 (require 'completion)
 (require 'init-org)
+(require 'cheatsheet)
 (require 'init-markdown)
 (require 'init-lsp)
 (require 'scheme-tools)

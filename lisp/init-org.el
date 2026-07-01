@@ -63,11 +63,80 @@ has a statistics cookie."
 (use-package org
   :ensure nil
   :hook (org-mode . init/org-enable-parent-cookie-tracking)
+  :bind (("C-c a" . org-agenda)
+         ("C-c c" . org-capture)
+         ("C-c j" . init/org-goto-journal)
+         ("C-c l" . org-store-link))
+  :custom
+  (org-directory "~/.org")
+  ;; Scan the whole org directory for TODOs, SCHEDULED and DEADLINE items.
+  (org-agenda-files (list "~/.org"))
+  ;; Record a timestamp when a task is marked DONE.
+  (org-log-done 'time)
+  ;; Start the agenda on the current day and show one week.
+  (org-agenda-start-on-weekday nil)
+  (org-agenda-span 'week)
+  ;; File names below are relative to `org-directory'.  The journal is a
+  ;; single entry per day, so it is edited via `init/org-goto-journal'
+  ;; rather than captured (capture always appends a new item).
+  (org-capture-templates
+   '(("t" "TODO (inbox)" entry
+      (file+headline "tasks.org" "Inbox")
+      "* TODO %?\n%U"
+      :empty-lines 1)
+     ("s" "Scheduled TODO" entry
+      (file+headline "tasks.org" "Inbox")
+      "* TODO %?\nSCHEDULED: %^{Schedule}t\n%U"
+      :empty-lines 1)))
   :config
+  ;; Load the agenda now so its keymap exists for menus and cheatsheets.
+  (require 'org-agenda)
   (init/org-set-heading-faces)
   (add-hook 'org-after-todo-state-change-hook
             #'init/org-add-cookie-to-todo-parent)
   (add-hook 'org-after-todo-statistics-hook #'org-summary-todo))
+
+;;;; Agenda menu
+
+(defun init/org-goto-journal (&optional arg)
+  "Visit today's entry in the journal datetree, creating it if needed.
+Point is left at the end of that day's entry so you keep a single entry
+per day and just keep writing.  With a prefix ARG, prompt for a
+different date instead of using today."
+  (interactive "P")
+  (require 'org-datetree)
+  (find-file (expand-file-name "journal.org" org-directory))
+  (org-datetree-find-date-create
+   (if arg
+       (let ((time (org-read-date nil t nil "Journal date")))
+         (list (nth 4 (decode-time time))
+               (nth 3 (decode-time time))
+               (nth 5 (decode-time time))))
+     (calendar-current-date)))
+  (when (fboundp 'org-fold-show-entry) (org-fold-show-entry))
+  (org-end-of-subtree)
+  (unless (bolp) (insert "\n")))
+
+(defun init/org-capture-todo ()
+  "Capture a new TODO into the inbox."
+  (interactive)
+  (org-capture nil "t"))
+
+(easy-menu-define init/agenda-menu global-map
+  "Agenda and capture actions."
+  '("Agenda"
+    ["Open agenda dispatcher..." org-agenda t]
+    ["This week's agenda" org-agenda-list t]
+    ["Global TODO list" org-todo-list t]
+    "---"
+    ["Open today's journal" init/org-goto-journal t]
+    ["Capture..." org-capture t]
+    ["New TODO" init/org-capture-todo t]
+    "---"
+    ["Schedule heading at point" org-schedule
+     :active (derived-mode-p 'org-mode)]
+    ["Set deadline on heading" org-deadline
+     :active (derived-mode-p 'org-mode)]))
 
 (use-package org-superstar
   :hook (org-mode . org-superstar-mode)

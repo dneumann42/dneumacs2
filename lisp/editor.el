@@ -184,19 +184,42 @@
 `on' forces it visible everywhere, `off' forces it hidden, and nil
 defers to `init/menu-bar-auto-modes'.")
 
+(defun init/menu-bar-relevant-buffer ()
+  "Return the buffer whose mode should decide menu-bar visibility.
+This is the buffer displayed in the frame's selected window, not
+`current-buffer', which during window-change hooks is often a transient
+or minibuffer buffer.  While the minibuffer is active, defer to the
+window that was selected before it, so prompts do not flicker the menu."
+  (window-buffer (or (minibuffer-selected-window) (selected-window))))
+
 (defun init/menu-bar-desired-p ()
-  "Return non-nil when the menu bar should be visible in the current buffer."
+  "Return non-nil when the menu bar should be visible right now."
   (pcase init/menu-bar-override
     ('on t)
     ('off nil)
-    (_ (apply #'derived-mode-p init/menu-bar-auto-modes))))
+    (_ (with-current-buffer (init/menu-bar-relevant-buffer)
+         (apply #'derived-mode-p init/menu-bar-auto-modes)))))
 
-(defun init/menu-bar-refresh (&rest _)
-  "Show or hide the menu bar according to the current buffer and override."
+(defvar init/menu-bar--refresh-timer nil
+  "Pending one-shot timer for `init/menu-bar-refresh', or nil.")
+
+(defun init/menu-bar--apply ()
+  "Show or hide the menu bar according to the selected buffer and override.
+Runs outside of redisplay so the frame actually redraws the menu bar."
+  (setq init/menu-bar--refresh-timer nil)
   (let ((want (init/menu-bar-desired-p))
         (cur (bound-and-true-p menu-bar-mode)))
     (unless (eq (and want t) (and cur t))
       (menu-bar-mode (if want 1 -1)))))
+
+(defun init/menu-bar-refresh (&rest _)
+  "Schedule a menu-bar refresh once the current command finishes.
+The refresh is deferred (and debounced) because it is triggered from
+window-change hooks that run during redisplay; toggling `menu-bar-mode'
+there leaves the frame without a menu bar until the next redraw."
+  (unless init/menu-bar--refresh-timer
+    (setq init/menu-bar--refresh-timer
+          (run-at-time 0 nil #'init/menu-bar--apply))))
 
 (defun init/toggle-menu-bar ()
   "Toggle the menu bar and remember the manual choice.
@@ -415,6 +438,9 @@ If no compilation buffer exists, start a new compilation."
         (append global-mode-string (list init/menu-bar-modeline-button))))
 (add-hook 'window-selection-change-functions #'init/menu-bar-refresh)
 (add-hook 'window-buffer-change-functions #'init/menu-bar-refresh)
+;; Show/hide as soon as a buffer's major mode is set (e.g. opening an
+;; Org file), not only on the next window change.
+(add-hook 'after-change-major-mode-hook #'init/menu-bar-refresh)
 
 ;;;; Keybindings
 
