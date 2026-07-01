@@ -270,23 +270,54 @@ Adjusts `tab-bar-lines' (safe with a side window open) rather than toggling
   (message "Menu bar %s"
            (if (eq init/menu-bar-override 'on) "shown" "hidden")))
 
-(defvar init/menu-bar-modeline-button
+(declare-function treemacs "treemacs")
+(declare-function projectile-switch-project "projectile")
+(declare-function projectile-find-file "projectile")
+(declare-function magit-status "magit")
+(declare-function org-capture "org-capture")
+(declare-function project-eshell "project")
+(declare-function consult-ripgrep "consult")
+
+(defun init/modeline-button (glyph help command)
+  "Return a clickable mode-line segment showing GLYPH that runs COMMAND."
   (propertize
-   " ☰ "
-   'help-echo "mouse-1: Toggle menu bar"
+   (format " %s " glyph)
+   'help-echo (concat "mouse-1: " help)
    'mouse-face 'mode-line-highlight
    'local-map (let ((map (make-sparse-keymap)))
-                (define-key map [mode-line mouse-1] #'init/toggle-menu-bar)
-                map))
-  "Clickable modeline segment that toggles the menu bar.")
+                (define-key map [mode-line mouse-1] command)
+                map)))
+
+(defun init/modeline-buttons ()
+  "Return the clickable button strip shown in the mode line."
+  (concat
+   (init/modeline-button "☰" "Toggle menu bar" #'init/toggle-menu-bar)
+   (init/modeline-button "◧" "Toggle Treemacs" #'treemacs)
+   (init/modeline-button "❒" "Open project" #'projectile-switch-project)
+   (init/modeline-button "⎇" "Magit status" #'magit-status)
+   (init/modeline-button "❯" "Project eshell" #'project-eshell)
+   (init/modeline-button "✎" "Org capture" #'org-capture)
+   (init/modeline-button "◐" "Toggle transparency" #'init/toggle-frame-transparency)
+   (init/modeline-button "▤" "Find file in project" #'projectile-find-file)
+   (init/modeline-button "⌕" "Search in project" #'consult-ripgrep)))
 
 ;;;; Misc editor commands and helpers
 
 (defun init/reload-config ()
-  "Reload the full Emacs configuration from `user-init-file'."
+  "Reload the configuration, re-evaluating the lisp/ modules too.
+Loading `user-init-file' alone re-runs its `require' forms, but those are
+no-ops for already-loaded features.  Dropping every feature whose file lives
+under lisp/ from `features' first makes those requires re-load in order."
   (interactive)
   (condition-case err
-      (progn
+      (let ((lisp-dir (file-name-as-directory
+                       (expand-file-name "lisp" user-emacs-directory))))
+        (setq features
+              (seq-remove
+               (lambda (feat)
+                 (let ((file (locate-library (symbol-name feat))))
+                   (and file (string-prefix-p lisp-dir (expand-file-name file)))))
+               features))
         (load-file user-init-file)
         (message "Config reloaded: %s" user-init-file))
     (error
@@ -477,9 +508,9 @@ If no compilation buffer exists, start a new compilation."
 ;; Enable the tab bar once, before any side window exists; never toggle it.
 (tab-bar-mode 1)
 
-(unless (member init/menu-bar-modeline-button global-mode-string)
+(unless (member '(:eval (init/modeline-buttons)) global-mode-string)
   (setq global-mode-string
-        (append global-mode-string (list init/menu-bar-modeline-button))))
+        (append global-mode-string '((:eval (init/modeline-buttons))))))
 (add-hook 'window-selection-change-functions #'init/menu-bar-refresh)
 (add-hook 'window-buffer-change-functions #'init/menu-bar-refresh)
 (add-hook 'after-change-major-mode-hook #'init/menu-bar-refresh)
