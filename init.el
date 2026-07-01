@@ -17,6 +17,7 @@
 (require 'init-lsp)
 (require 'scheme-tools)
 (require 'project-tools)
+(require 'project-panel)
 (require 'c-tools)
 (require 'nim)
 (require 'rust)

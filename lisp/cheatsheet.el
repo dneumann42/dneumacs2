@@ -201,6 +201,10 @@ Interactively, prompt with completion over the registered cheatsheets."
     (:note "The action taken adapts to the current language.")))
 
 (cheatsheet-define "Projects (Projectile)"
+  '("Project panel (repo registry)"
+    (init/project-panel-toggle "Toggle the panel (also ▦ in the mode line)")
+    (:note "In the panel: a add, c clone, RET/o open, u fetch,")
+    (:note "d remove, g refresh, TAB between buttons, q close."))
   '("Move around a project"
     (projectile-switch-project   "Switch to another project")
     (projectile-find-file        "Find a file in the project")
