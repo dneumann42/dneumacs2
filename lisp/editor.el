@@ -419,6 +419,17 @@ under lisp/ from `features' first makes those requires re-load in order."
   :init
   (global-set-key (kbd bind/avy-goto-char) #'avy-goto-char))
 
+;; vim-surround style editing of pairs: () {} [] <> "" '' ``.
+;; M-' s wraps the region (or symbol at point), M-' c changes the
+;; closest pair to another, M-' d deletes it, M-' k / K kill inside /
+;; including the pair, M-' i / o mark inside / including it, and a bare
+;; pair key (e.g. M-' ( ) marks within that pair.
+(use-package surround
+  :ensure t
+  :demand t
+  :config
+  (global-set-key (kbd bind/surround) surround-keymap))
+
 ;; Prefer tree-sitter major modes and offer to install missing grammars.
 (use-package treesit-auto
   :custom

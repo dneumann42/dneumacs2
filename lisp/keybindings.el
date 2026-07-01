@@ -37,6 +37,10 @@
   "Alternate key sequence for the project bookmark picker.")
 (defconst bind/bm-clear-buffer "C-c ,"
   "Key sequence for removing all bookmarks in the current file.")
+
+;;;; Surround (vim-surround style pair editing)
+(defconst bind/surround "M-'"
+  "Prefix key for the surround keymap (wrap/change/delete pairs).")
 (defconst bind/compile "<f5>"
   "Key sequence for starting a compilation.")
 (defconst bind/forward-paragraph "M-n"

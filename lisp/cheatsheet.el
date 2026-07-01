@@ -295,6 +295,13 @@ Interactively, prompt with completion over the registered cheatsheets."
     (forward-paragraph  "Move forward a paragraph")
     (backward-paragraph "Move backward a paragraph")
     (repeat            "Repeat the last command"))
+  '("Surround: pairs () {} [] <> \"\" '' ``"
+    (:keys "M-' s" "Wrap region / symbol with a pair")
+    (:keys "M-' c" "Change the closest pair, e.g. ( to [")
+    (:keys "M-' d" "Delete the closest pair")
+    (:keys "M-' k" "Kill inside the pair (K: pair too)")
+    (:keys "M-' i" "Mark inside the pair (o: pair too)")
+    (:note "A bare pair key marks within it, e.g. M-' ("))
   '("Bookmarks (fringe click also toggles)"
     (bm-toggle            "Toggle a bookmark on this line")
     (bm-next              "Next bookmark in this file")
