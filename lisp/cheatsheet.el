@@ -311,7 +311,14 @@ Interactively, prompt with completion over the registered cheatsheets."
     (:note "Bookmarks persist per file across restarts."))
   '("Compilation"
     (compile               "Run a compile command")
-    (init/compilation-toggle "Toggle the compilation buffer")))
+    (init/compilation-toggle "Toggle the compilation buffer"))
+  '("PDFs (toolbar at the top of each PDF)"
+    (:keys "n / p"   "Next / previous page")
+    (:keys "+ / -"   "Zoom in / out, 0 resets")
+    (:keys "W / H / P" "Fit width / height / page")
+    (:keys "o"       "Outline (table of contents)")
+    (:keys "C-s"     "Search inside the PDF")
+    (:note "First PDF open offers to build the epdfinfo helper.")))
 
 (provide 'cheatsheet)
 ;;; cheatsheet.el ends here

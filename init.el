@@ -20,6 +20,7 @@
 (require 'project-panel)
 (require 'sessions)
 (require 'bm-setup)
+(require 'pdf-setup)
 (require 'c-tools)
 (require 'nim)
 (require 'rust)
