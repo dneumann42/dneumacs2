@@ -54,7 +54,7 @@
           treemacs-tag-follow-delay                1.5
           treemacs-text-scale                      nil
           treemacs-user-mode-line-format           nil
-          treemacs-user-header-line-format         nil
+          treemacs-user-header-line-format         '("%e" (:eval (init/treemacs--buttons-string)))
           treemacs-wide-toggle-width               70
           treemacs-width                           35
           treemacs-width-increment                 1
@@ -110,21 +110,6 @@
   :after (treemacs magit)
   :ensure t)
 
-;; NOTE: Treemacs uses the default `treemacs-frame-scope' (one tree per
-;; frame), which is stable for this configuration.  We deliberately do NOT
-;; enable the tab-bar or perspective scopes:
-;;   * treemacs-tab-bar keys the scope on the current tab's *name*, which --
-;;     because `tab-bar-mode' here is only a menu bar with a single, unnamed
-;;     tab -- tracks the current buffer's name.  The tree then gets registered
-;;     under one scope key and looked up under another, so
-;;     `treemacs-get-local-buffer' returns nil after switching buffers.  That
-;;     silently breaks every command that resolves the tree by scope rather
-;;     than by window (collapse-all, the helpful hydra, follow cleanup, ...).
-;;   * treemacs-persp is pointless without `persp-mode', which is not used.
-
-;; Avoid startup focus grabs that can leave Evil in an unexpected state.
-;; Open Treemacs manually with `C-x t t`.
-
 ;;;; Treemacs buffer buttons
 
 (declare-function treemacs-find-file "treemacs")
@@ -138,27 +123,15 @@
   '((t :inherit font-lock-keyword-face :weight bold))
   "Face for the clickable buttons at the top of the Treemacs buffer.")
 
-(defvar-local init/treemacs--buttons-overlay nil
-  "Overlay whose `before-string' holds the Treemacs button row.")
-
 (defun init/treemacs--editor-buffer ()
-  "Return the most recently active file-visiting buffer outside Treemacs.
-`buffer-list' is ordered most-recently-selected first, so this is the
-last buffer that had focus before Treemacs did."
+  "Return the most recently active file-visiting buffer outside Treemacs."
   (seq-find (lambda (buf)
               (and (buffer-file-name buf)
                    (not (eq (buffer-local-value 'major-mode buf) 'treemacs-mode))))
             (buffer-list)))
 
 (defun init/treemacs-focus-current-file ()
-  "Reveal, in the Treemacs tree, the file of the last active editor buffer.
-Drives the live Treemacs window directly rather than going through
-`treemacs-find-file'.  That matters because `treemacs-find-file' reads
-the file from `current-buffer' (which, when invoked from a button in the
-Treemacs window, is the non-file Treemacs buffer) and its window/visibility
-dance can leave the goto running in a buffer whose buffer-local
-`treemacs-dom' is nil -- the source of the `hash-table-p, nil' crash.
-Selecting the already-rendered Treemacs window guarantees a live dom."
+  "Reveal, in the Treemacs tree, the file of the last active editor buffer."
   (interactive)
   (let* ((buf  (init/treemacs--editor-buffer))
          (file (and buf (buffer-file-name buf)))
@@ -176,49 +149,40 @@ Selecting the already-rendered Treemacs window guarantees a live dom."
              (propertize file 'face 'font-lock-string-face)))))))))
 
 (defun init/treemacs--button-keymap (on-click)
-  "Return a keymap that runs ON-CLICK on `mouse-1'.
-Treemacs binds `down-mouse-1' in its mode map to a handler that selects
-the window and moves point.  Because that runs on button *press*, it
-would otherwise swallow the first click on our buttons and force the user
-to click repeatedly.  Shadowing the down/drag/double events here (this
-keymap takes precedence over the major-mode map) makes every click land
-on ON-CLICK the first time."
+  "Return a keymap running ON-CLICK on a header-line `mouse-1' click."
   (let ((m (make-sparse-keymap)))
-    (define-key m [down-mouse-1]   #'ignore)
-    (define-key m [drag-mouse-1]   #'ignore)
-    (define-key m [double-mouse-1] #'ignore)
-    (define-key m [mouse-1] on-click)
+    (define-key m [header-line mouse-1] on-click)
     m))
 
 (defun init/treemacs--button (label help command)
-  "Return a clickable LABEL string running COMMAND on `mouse-1'."
+  "Return a clickable header-line LABEL string running COMMAND."
   (propertize
    label
    'help-echo help 'mouse-face 'highlight 'face 'init/treemacs-button 'pointer 'hand
-   'keymap (init/treemacs--button-keymap
-            (lambda (event)
-              (interactive "e")
-              (with-selected-window (posn-window (event-start event))
-                (call-interactively command))))))
+   'local-map (init/treemacs--button-keymap
+               (lambda (event)
+                 (interactive "e")
+                 (with-selected-window (posn-window (event-start event))
+                   (call-interactively command))))))
 
 (defun init/treemacs--menu-button (label help menu)
-  "Return a clickable LABEL string that pops up MENU on `mouse-1'."
+  "Return a clickable header-line LABEL string that pops up MENU."
   (propertize
    label
    'help-echo help 'mouse-face 'highlight 'face 'init/treemacs-button 'pointer 'hand
-   'keymap (init/treemacs--button-keymap
-            (lambda (event)
-              (interactive "e")
-              (let* ((km (easy-menu-create-menu nil menu))
-                     (choice (x-popup-menu event km)))
-                (when choice
-                  (let ((cmd (lookup-key km (apply #'vector choice))))
-                    (when (commandp cmd)
-                      (with-selected-window (posn-window (event-start event))
-                        (call-interactively cmd))))))))))
+   'local-map (init/treemacs--button-keymap
+               (lambda (event)
+                 (interactive "e")
+                 (let* ((km (easy-menu-create-menu nil menu))
+                        (choice (x-popup-menu event km)))
+                   (when choice
+                     (let ((cmd (lookup-key km (apply #'vector choice))))
+                       (when (commandp cmd)
+                         (with-selected-window (posn-window (event-start event))
+                           (call-interactively cmd))))))))))
 
 (defun init/treemacs--buttons-string ()
-  "Build the Treemacs button row shown at the top of the buffer."
+  "Build the sticky Treemacs toolbar row for the header line."
   (concat
    " "
    (init/treemacs--button "⌖" "Focus current file" #'init/treemacs-focus-current-file) " "
@@ -235,20 +199,7 @@ on ON-CLICK the first time."
       ["Rename Workspace…" treemacs-rename-workspace]
       ["Remove Workspace…" treemacs-remove-workspace]
       "--"
-      ["Edit Workspaces…"  treemacs-edit-workspaces]))
-   "\n\n"))
-
-(defun init/treemacs-refresh-buttons (&rest _)
-  "Ensure the button row overlay exists at the top of the Treemacs buffer."
-  (when (derived-mode-p 'treemacs-mode)
-    (unless (and (overlayp init/treemacs--buttons-overlay)
-                 (overlay-buffer init/treemacs--buttons-overlay))
-      (setq init/treemacs--buttons-overlay (make-overlay (point-min) (point-min))))
-    (overlay-put init/treemacs--buttons-overlay 'before-string
-                 (init/treemacs--buttons-string))))
-
-(add-hook 'treemacs-post-buffer-init-hook #'init/treemacs-refresh-buttons)
-(add-hook 'treemacs-post-refresh-hook #'init/treemacs-refresh-buttons)
+      ["Edit Workspaces…"  treemacs-edit-workspaces]))))
 
 (provide 'treemacs-setup)
 ;;; treemacs-setup.el ends here
