@@ -18,6 +18,8 @@
   "Key sequence for toggling the compilation buffer.")
 (defconst bind/project-panel "C-c P"
   "Key sequence for toggling the project panel.")
+(defconst bind/session-menu "C-c S"
+  "Key sequence for opening the session menu.")
 (defconst bind/compile "<f5>"
   "Key sequence for starting a compilation.")
 (defconst bind/forward-paragraph "M-n"

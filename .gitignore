@@ -43,6 +43,10 @@ custom.el
 # Backup init file
 init.el~
 
+# Session state (easysession) and persistent *scratch*
+easysession/
+.persistent-scratch
+
 # Save-place history
 places
 

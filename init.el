@@ -18,6 +18,7 @@
 (require 'scheme-tools)
 (require 'project-tools)
 (require 'project-panel)
+(require 'sessions)
 (require 'c-tools)
 (require 'nim)
 (require 'rust)

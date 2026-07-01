@@ -279,6 +279,7 @@ Adjusts `tab-bar-lines' (safe with a side window open) rather than toggling
 (declare-function consult-ripgrep "consult")
 (declare-function init/project-search "project-tools")
 (declare-function init/project-panel-toggle "project-panel")
+(declare-function init/session-menu "sessions")
 
 (defun init/modeline-button (glyph help command)
   "Return a clickable mode-line segment showing GLYPH that runs COMMAND."
@@ -297,6 +298,7 @@ Adjusts `tab-bar-lines' (safe with a side window open) rather than toggling
    (init/modeline-button "◧" "Toggle Treemacs" #'treemacs)
    (init/modeline-button "❒" "Open project" #'projectile-switch-project)
    (init/modeline-button "▦" "Toggle project panel" #'init/project-panel-toggle)
+   (init/modeline-button "⧉" "Sessions" #'init/session-menu)
    (init/modeline-button "⎇" "Magit status" #'magit-status)
    (init/modeline-button "❯" "Project eshell" #'project-eshell)
    (init/modeline-button "✎" "Org capture" #'org-capture)

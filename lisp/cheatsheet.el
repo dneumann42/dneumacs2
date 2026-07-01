@@ -286,6 +286,10 @@ Interactively, prompt with completion over the registered cheatsheets."
   '("Frame & UI"
     (init/toggle-menu-bar          "Show / hide the menu bar")
     (init/toggle-frame-transparency "Toggle frame transparency"))
+  '("Sessions (also ⧉ in the mode line)"
+    (init/session-menu "Session menu: new / load / save / delete")
+    (:note "Sessions auto-save and restore on restart.")
+    (:note "Opening a project loads its own session automatically."))
   '("Moving & editing"
     (avy-goto-char     "Jump to a visible character")
     (forward-paragraph  "Move forward a paragraph")
