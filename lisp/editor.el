@@ -174,7 +174,11 @@
     (set-frame-parameter nil 'alpha-background next)
     (message "Frame transparency: %s%%" next)))
 
-;;;; Menu bar
+;;;; Menu bar (rendered in the tab bar)
+
+;; `tab-bar-mode' is enabled once at startup and never toggled: toggling it
+;; while a side window (Treemacs) is displayed segfaults pgtk redisplay.  The
+;; menu is shown/hidden purely by what `init/tab-bar-menu-format' returns.
 
 (defvar init/menu-bar-auto-modes '(org-mode)
   "Major modes for which the menu bar is shown automatically.")
@@ -200,34 +204,68 @@ window that was selected before it, so prompts do not flicker the menu."
     (_ (with-current-buffer (init/menu-bar-relevant-buffer)
          (apply #'derived-mode-p init/menu-bar-auto-modes)))))
 
-(defvar init/menu-bar--refresh-timer nil
-  "Pending one-shot timer for `init/menu-bar-refresh', or nil.")
+(defun init/tab-bar--menu-entry (binding)
+  "Return (LABEL . MENU-KEYMAP) for a top-level menu-bar BINDING, or nil.
+Handles the `menu-item' form produced by `easy-menu-define' as well as the
+simple (\"Name\" . KEYMAP) form used by plain `define-key' menus (such as
+the cheatsheet Guides menu)."
+  (cond
+   ((eq (car-safe binding) 'menu-item)
+    (let ((label (nth 1 binding))
+          (menu (nth 2 binding)))
+      (when (symbolp menu)
+        (setq menu (cond
+                    ((and (fboundp menu) (keymapp (symbol-function menu)))
+                     (symbol-function menu))
+                    ((and (boundp menu) (keymapp (symbol-value menu)))
+                     (symbol-value menu))
+                    (t menu))))
+      (when (and (stringp label) (keymapp menu))
+        (cons label menu))))
+   ((and (consp binding) (stringp (car binding)) (keymapp (cdr binding)))
+    (cons (car binding) (cdr binding)))
+   ((keymapp binding)
+    (cons (or (keymap-prompt binding) "Menu") binding))))
 
-(defun init/menu-bar--apply ()
-  "Show or hide the menu bar according to the selected buffer and override.
-Runs outside of redisplay so the frame actually redraws the menu bar."
-  (setq init/menu-bar--refresh-timer nil)
-  (let ((want (init/menu-bar-desired-p))
-        (cur (bound-and-true-p menu-bar-mode)))
-    (unless (eq (and want t) (and cur t))
-      (menu-bar-mode (if want 1 -1)))))
+(defun init/tab-bar-menu-format ()
+  "Return a clickable tab-bar button per top-level menu, or nil when hidden."
+  (when (init/menu-bar-desired-p)
+    (let (items)
+      (map-keymap
+       (lambda (key binding)
+         (let ((entry (init/tab-bar--menu-entry binding)))
+           (when entry
+             (let ((label (car entry))
+                   (menu (cdr entry)))
+               (push
+                `(,key menu-item
+                       ,(propertize (concat " " label " ")
+                                    'face 'tab-bar-tab-inactive
+                                    'mouse-face 'highlight)
+                       ,(lambda (event)
+                          (interactive "e")
+                          (popup-menu menu event))
+                       :help ,label)
+                items)))))
+       (menu-bar-keymap))
+      (nreverse items))))
 
 (defun init/menu-bar-refresh (&rest _)
-  "Schedule a menu-bar refresh once the current command finishes.
-The refresh is deferred (and debounced) because it is triggered from
-window-change hooks that run during redisplay; toggling `menu-bar-mode'
-there leaves the frame without a menu bar until the next redraw."
-  (unless init/menu-bar--refresh-timer
-    (setq init/menu-bar--refresh-timer
-          (run-at-time 0 nil #'init/menu-bar--apply))))
+  "Show or hide the tab-bar menu by setting its height on visibility changes.
+Adjusts `tab-bar-lines' (safe with a side window open) rather than toggling
+`tab-bar-mode' (which crashes); only acts on an actual change."
+  (when (bound-and-true-p tab-bar-mode)
+    (let ((want (and (init/menu-bar-desired-p) t))
+          (shown (> (or (frame-parameter nil 'tab-bar-lines) 0) 0)))
+      (unless (eq want shown)
+        (set-frame-parameter nil 'tab-bar-lines (if want 1 0))
+        (force-mode-line-update t)))))
 
 (defun init/toggle-menu-bar ()
-  "Toggle the menu bar and remember the manual choice.
-This override takes precedence over the automatic per-mode behaviour
-configured in `init/menu-bar-auto-modes'."
+  "Toggle the tab-bar menu on or off and remember the manual choice."
   (interactive)
   (setq init/menu-bar-override
-        (if (bound-and-true-p menu-bar-mode) 'off 'on))
+        (if (init/menu-bar-desired-p) 'off 'on))
   (init/menu-bar-refresh)
   (message "Menu bar %s"
            (if (eq init/menu-bar-override 'on) "shown" "hidden")))
@@ -431,15 +469,19 @@ If no compilation buffer exists, start a new compilation."
 
 ;;;; Menu bar activation
 
-;; Menu bar: hidden by default, shown automatically in Org buffers, and
-;; toggleable via keybinding or the clickable modeline segment.
+;; `tab-bar-auto-width' nil stops buttons being stretched to a 20-column min.
+(setq tab-bar-format '(init/tab-bar-menu-format)
+      tab-bar-show t
+      tab-bar-auto-width nil)
+
+;; Enable the tab bar once, before any side window exists; never toggle it.
+(tab-bar-mode 1)
+
 (unless (member init/menu-bar-modeline-button global-mode-string)
   (setq global-mode-string
         (append global-mode-string (list init/menu-bar-modeline-button))))
 (add-hook 'window-selection-change-functions #'init/menu-bar-refresh)
 (add-hook 'window-buffer-change-functions #'init/menu-bar-refresh)
-;; Show/hide as soon as a buffer's major mode is set (e.g. opening an
-;; Org file), not only on the next window change.
 (add-hook 'after-change-major-mode-hook #'init/menu-bar-refresh)
 
 ;;;; Keybindings

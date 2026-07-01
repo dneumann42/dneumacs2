@@ -52,6 +52,11 @@
    `(line-number ((t (:foreground "#5f5f74" :background ,bg))))
    `(line-number-current-line ((t (:foreground ,fg :background ,bg-alt))))
    `(header-line ((t (:background ,bg-alt :foreground ,fg-alt :box nil))))
+   `(tab-bar ((t (:inherit default :box (:line-width (1 . -1) :color "#2a2a2a")))))
+   `(tab-bar-tab ((t (:inherit default :weight bold
+                      :box (:line-width (1 . -1) :color "#2a2a2a")))))
+   `(tab-bar-tab-inactive ((t (:inherit default :foreground ,fg-alt :weight normal
+                               :box (:line-width (1 . -1) :color "#2a2a2a")))))
    `(hl-line ((t (:background "#101018"))))
    `(trailing-whitespace ((t (:background "#4a001f"))))
    `(company-tooltip ((t (:background "#101010" :foreground ,fg))))
