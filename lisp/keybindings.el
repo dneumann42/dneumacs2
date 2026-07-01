@@ -5,6 +5,7 @@
 
 ;; Editor
 (defconst bind/toggle-frame-transparency "C-c t")
+(defconst bind/toggle-menu-bar "C-c M")
 (defconst bind/reload-config "C-c r")
 (defconst bind/compilation-toggle "C-c c")
 (defconst bind/compile "<f5>")

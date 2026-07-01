@@ -155,6 +155,49 @@
     (set-frame-parameter nil 'alpha-background next)
     (message "Frame transparency: %s%%" next)))
 
+(defvar init/menu-bar-auto-modes '(org-mode)
+  "Major modes for which the menu bar is shown automatically.")
+
+(defvar init/menu-bar-override nil
+  "Manual override for the menu bar.
+`on' forces it visible everywhere, `off' forces it hidden, and nil
+defers to `init/menu-bar-auto-modes'.")
+
+(defun init/menu-bar-desired-p ()
+  "Return non-nil when the menu bar should be visible in the current buffer."
+  (pcase init/menu-bar-override
+    ('on t)
+    ('off nil)
+    (_ (apply #'derived-mode-p init/menu-bar-auto-modes))))
+
+(defun init/menu-bar-refresh (&rest _)
+  "Show or hide the menu bar according to the current buffer and override."
+  (let ((want (init/menu-bar-desired-p))
+        (cur (bound-and-true-p menu-bar-mode)))
+    (unless (eq (and want t) (and cur t))
+      (menu-bar-mode (if want 1 -1)))))
+
+(defun init/toggle-menu-bar ()
+  "Toggle the menu bar and remember the manual choice.
+This override takes precedence over the automatic per-mode behaviour
+configured in `init/menu-bar-auto-modes'."
+  (interactive)
+  (setq init/menu-bar-override
+        (if (bound-and-true-p menu-bar-mode) 'off 'on))
+  (init/menu-bar-refresh)
+  (message "Menu bar %s"
+           (if (eq init/menu-bar-override 'on) "shown" "hidden")))
+
+(defvar init/menu-bar-modeline-button
+  (propertize
+   " ☰ "
+   'help-echo "mouse-1: Toggle menu bar"
+   'mouse-face 'mode-line-highlight
+   'local-map (let ((map (make-sparse-keymap)))
+                (define-key map [mode-line mouse-1] #'init/toggle-menu-bar)
+                map))
+  "Clickable modeline segment that toggles the menu bar.")
+
 (defun init/reload-config ()
   "Reload the full Emacs configuration from `user-init-file'."
   (interactive)
@@ -332,6 +375,15 @@ If no compilation buffer exists, start a new compilation."
 
 (add-hook 'compilation-mode-hook #'init/compilation-mode-hook)
 
+;; Menu bar: hidden by default, shown automatically in Org buffers, and
+;; toggleable via keybinding or the clickable modeline segment.
+(unless (member init/menu-bar-modeline-button global-mode-string)
+  (setq global-mode-string
+        (append global-mode-string (list init/menu-bar-modeline-button))))
+(add-hook 'window-selection-change-functions #'init/menu-bar-refresh)
+(add-hook 'window-buffer-change-functions #'init/menu-bar-refresh)
+
+(global-set-key (kbd bind/toggle-menu-bar) #'init/toggle-menu-bar)
 (global-set-key (kbd bind/toggle-frame-transparency) #'init/toggle-frame-transparency)
 (global-set-key (kbd bind/reload-config) #'init/reload-config)
 (global-set-key (kbd bind/compilation-toggle) #'init/compilation-toggle)
