@@ -277,6 +277,7 @@ Adjusts `tab-bar-lines' (safe with a side window open) rather than toggling
 (declare-function org-capture "org-capture")
 (declare-function project-eshell "project")
 (declare-function consult-ripgrep "consult")
+(declare-function init/project-search "project-tools")
 
 (defun init/modeline-button (glyph help command)
   "Return a clickable mode-line segment showing GLYPH that runs COMMAND."
@@ -299,7 +300,7 @@ Adjusts `tab-bar-lines' (safe with a side window open) rather than toggling
    (init/modeline-button "✎" "Org capture" #'org-capture)
    (init/modeline-button "◐" "Toggle transparency" #'init/toggle-frame-transparency)
    (init/modeline-button "▤" "Find file in project" #'projectile-find-file)
-   (init/modeline-button "⌕" "Search in project" #'consult-ripgrep)))
+   (init/modeline-button "⌕" "Project search" #'init/project-search)))
 
 ;;;; Misc editor commands and helpers
 
