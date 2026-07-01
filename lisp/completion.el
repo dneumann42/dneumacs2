@@ -14,7 +14,7 @@
   :bind
   (:map vertico-map
         ("C-j" . vertico-next)
-        ("C-k" . vertico-previous)
+        ("C-p" . vertico-previous)
         ("C-f" . vertico-exit)
         ("M-RET" . vertico-exit-input)))
 
