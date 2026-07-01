@@ -47,6 +47,9 @@ init.el~
 easysession/
 .persistent-scratch
 
+# Visible bookmarks (bm)
+bm-repository
+
 # Save-place history
 places
 

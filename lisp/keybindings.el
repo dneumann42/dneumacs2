@@ -20,6 +20,23 @@
   "Key sequence for toggling the project panel.")
 (defconst bind/session-menu "C-c S"
   "Key sequence for opening the session menu.")
+
+;;;; Bookmarks (bm)
+;; Single-chord marks, like Vim's m/]'/['.  After M-] or M-[, repeat-mode
+;; keeps plain ] and [ live so you can hop between bookmarks with one
+;; keypress ("," drops a bookmark mid-hop).
+(defconst bind/bm-toggle "C-,"
+  "Key sequence for toggling a bookmark on the current line.")
+(defconst bind/bm-next "M-]"
+  "Key sequence for jumping to the next bookmark in the file.")
+(defconst bind/bm-previous "M-["
+  "Key sequence for jumping to the previous bookmark in the file.")
+(defconst bind/bm-jump-project "C-M-,"
+  "Key sequence for jumping to any bookmark in the project.")
+(defconst bind/bm-jump-project-alt "M-g b"
+  "Alternate key sequence for the project bookmark picker.")
+(defconst bind/bm-clear-buffer "C-c ,"
+  "Key sequence for removing all bookmarks in the current file.")
 (defconst bind/compile "<f5>"
   "Key sequence for starting a compilation.")
 (defconst bind/forward-paragraph "M-n"

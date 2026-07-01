@@ -19,6 +19,7 @@
 (require 'project-tools)
 (require 'project-panel)
 (require 'sessions)
+(require 'bm-setup)
 (require 'c-tools)
 (require 'nim)
 (require 'rust)

@@ -295,6 +295,13 @@ Interactively, prompt with completion over the registered cheatsheets."
     (forward-paragraph  "Move forward a paragraph")
     (backward-paragraph "Move backward a paragraph")
     (repeat            "Repeat the last command"))
+  '("Bookmarks (fringe click also toggles)"
+    (bm-toggle            "Toggle a bookmark on this line")
+    (bm-next              "Next bookmark in this file")
+    (bm-previous          "Previous bookmark in this file")
+    (init/bm-jump-project "Jump to any bookmark in the project")
+    (bm-remove-all-current-buffer "Clear this file's bookmarks")
+    (:note "Bookmarks persist per file across restarts."))
   '("Compilation"
     (compile               "Run a compile command")
     (init/compilation-toggle "Toggle the compilation buffer")))
