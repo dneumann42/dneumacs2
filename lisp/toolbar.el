@@ -142,7 +142,14 @@ MENU is an easy-menu item list; HELP is the tooltip."
 
 (defun init/toolbar-separator ()
   "Return the separator drawn between toolbar groups."
-  (propertize " │ " 'face 'init/toolbar-info))
+  (propertize "│" 'face 'init/toolbar-info))
+
+(defun init/toolbar--gap ()
+  "Return the fixed-width gap drawn between toolbar items.
+A `:width' display spec keeps the gap the same width regardless of
+which fallback font renders the neighbouring symbol glyphs, so wide
+icons cannot touch or overlap each other."
+  (propertize " " 'display '(space :width 1.75)))
 
 (defun init/toolbar-string (&rest items)
   "Compose ITEMS into a toolbar string.
@@ -162,13 +169,17 @@ See the Commentary for the accepted item forms."
                             ((listp item) (apply #'init/toolbar-button item))
                             (t (error "Unknown toolbar item: %S" item))))
                          items))
-           " ")
+           (init/toolbar--gap))
           ;; Fill the remainder of either a header line or the dedicated
           ;; toolbar window, so the border spans the complete bar.  The
           ;; taller invisible space adds vertical padding to the line box;
           ;; unlike a thicker `:box', it does not enlarge the border.
+          ;; Stop one pixel short of the edge: a line that exactly fills
+          ;; a `truncate-lines' window still gets a truncation glyph
+          ;; drawn over its last column.
           (propertize " " 'display
-                      '(space :align-to right-fringe :height 1.2 :ascent 80)))))
+                      '(space :align-to (- right-fringe (1))
+                              :height 1.2 :ascent 80)))))
     ;; Keep every segment at the same height and draw a bar edge rather
     ;; than underlining the text itself.
     (add-face-text-property 0 (length toolbar) '(:height 1.0) nil toolbar)

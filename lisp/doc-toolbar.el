@@ -6,9 +6,9 @@
 ;; file, project search, Magit, eshell, project panel, sessions,
 ;; transparency).  These actions are frame-global, so instead of a
 ;; header line per buffer there is a single one-line bar in a top side
-;; window, spanning the frame's width.  Left/right side windows keep
-;; their full height (`window-sides-vertical' nil), so the bar stops at
-;; the Treemacs edge instead of crossing it.
+;; window spanning the full frame width, including above Treemacs
+;; (`window-sides-vertical' nil).  Utilities sit on the left edge,
+;; project tools are right-aligned by a pixel-measured spacer.
 ;;
 ;; Hidden by default.  Toggle with the ⚒ mode-line button,
 ;; `bind/doc-toolbar', or M-x init/doc-toolbar-mode.  Clicks on the bar
@@ -116,10 +116,19 @@ when Vertico mode is enabled."
              :sep
              ;; Frame
              '("◐" "Toggle transparency" init/toggle-frame-transparency)))))
+         ;; Measure the section's true pixel width -- `string-width'
+         ;; counts columns, which undercounts the symbol glyphs drawn by
+         ;; wider fallback fonts and would push the section past the
+         ;; window edge, wrapping the bar.  The trailing fill is dropped
+         ;; from the measurement (its `:align-to' has no width of its
+         ;; own) but kept in the display, where it collapses to nothing.
+         (projects-width (string-pixel-width (substring projects 0 -1)))
          (spacer
           (propertize
            " "
-           'display `(space :align-to (- right-fringe ,(string-width projects)))
+           ;; One pixel of headroom, matching the toolbar fill: a line
+           ;; ending exactly at the window edge draws a truncation glyph.
+           'display `(space :align-to (- right-fringe (,(1+ projects-width))))
            'face '((:height 1.0) init/toolbar-border))))
     (concat utilities spacer projects)))
 
@@ -135,17 +144,28 @@ when Vertico mode is enabled."
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)
-        (insert (init/doc-toolbar--toolbar)))
+        (insert (init/doc-toolbar--toolbar))
+        ;; Leave point at the start.  At the end of the line it drags
+        ;; the window's display along -- auto-hscroll (or wrapping)
+        ;; scrolls the bar to show the line's tail and the leading
+        ;; tools vanish off the left edge.
+        (goto-char (point-min)))
       (setq-local mode-line-format nil
                   cursor-type nil
-                  buffer-read-only t))
+                  buffer-read-only t
+                  ;; Never wrap: a too-narrow window truncates the line
+                  ;; instead of folding the bar onto a second row.
+                  truncate-lines t
+                  ;; Never scroll the bar horizontally either.
+                  auto-hscroll-mode nil))
     buffer))
 
 (defun init/doc-toolbar--show ()
   "Display the toolbar bar in a one-line top side window."
-  ;; Keep left/right side windows (Treemacs) full height so the top bar
-  ;; spans the frame width without crossing them.
-  (setq window-sides-vertical nil)
+  ;; Left/right side windows (Treemacs) keep the full frame height when
+  ;; `window-sides-vertical' is t, so the bar spans everything except
+  ;; the Treemacs column.
+  (setq window-sides-vertical t)
   (unless (init/doc-toolbar--window)
     (let ((window (display-buffer-in-side-window
                    (init/doc-toolbar--buffer)
@@ -159,6 +179,10 @@ when Vertico mode is enabled."
         (set-window-parameter window 'no-delete-other-windows t)
         (set-window-parameter window 'mode-line-format 'none)
         (set-window-dedicated-p window t)
+        ;; A reused window may carry stale scroll state; show the bar
+        ;; from its very first character.
+        (set-window-point window 1)
+        (set-window-hscroll window 0)
         ;; A nominal one-line window can clip the toolbar face's bottom
         ;; border.  Fit the actual rendered line in pixels before fixing
         ;; and preserving the window height.
