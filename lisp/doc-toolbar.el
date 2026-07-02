@@ -32,32 +32,96 @@
 (declare-function init/project-panel-toggle "project-panel")
 (declare-function init/session-menu "sessions")
 (declare-function init/toggle-frame-transparency "editor")
+(declare-function init/reload-config "editor")
+(declare-function restart-emacs "restart-emacs")
 
 (defconst init/doc-toolbar-buffer-name " *toolbar*"
   "Name of the buffer backing the global toolbar bar.")
 
+(defun init/doc-toolbar-find-pdf ()
+  "Prompt for a PDF below ~/Documents and open it.
+The prompt uses `completing-read', and is therefore handled by Vertico
+when Vertico mode is enabled."
+  (interactive)
+  (let ((root (expand-file-name "~/Documents")))
+    (unless (file-directory-p root)
+      (user-error "Documents directory does not exist: %s" root))
+    (let* ((case-fold-search t)
+           (files (directory-files-recursively root "\\.pdf\\'"))
+           (choices (mapcar (lambda (file)
+                              (cons (file-relative-name file root) file))
+                            files)))
+      (unless choices
+        (user-error "No PDFs found below %s" root))
+      (find-file
+       (cdr (assoc (completing-read "Open PDF: " choices nil t) choices))))))
+
+(defun init/doc-toolbar-open-documents ()
+  "Open ~/Documents in Dired."
+  (interactive)
+  (dired (expand-file-name "~/Documents")))
+
+(defun init/doc-toolbar-open-scratch ()
+  "Switch to the persistent *scratch* buffer."
+  (interactive)
+  (switch-to-buffer (get-buffer-create "*scratch*")))
+
+(defun init/doc-toolbar-restart-emacs ()
+  "Restart Emacs after explicit confirmation."
+  (interactive)
+  (unless (fboundp 'restart-emacs)
+    (user-error "The restart-emacs command is unavailable"))
+  (when (yes-or-no-p "Restart Emacs now? ")
+    (restart-emacs)))
+
 (defun init/doc-toolbar--toolbar ()
-  "Build the global toolbar."
-  (init/toolbar-string
-   ;; Run & build
-   '("▶" "Run project (last run command)" init/project-run)
-   '("⚙" "Build project (last build command)" init/project-build)
-   '("⇄" "Switch what run/build executes" init/project-command-switch)
-   '("＋" "Add a project command" init/project-command-add)
-   :sep
-   ;; Project
-   '("❒" "Open project" projectile-switch-project)
-   '("▤" "Find file in project" projectile-find-file)
-   '("⌕" "Project search" init/project-search)
-   :sep
-   ;; Tools
-   '("⎇" "Magit status" magit-status)
-   '("❯" "Project eshell" project-eshell)
-   '("▦" "Toggle project panel" init/project-panel-toggle)
-   '("⧉" "Sessions" init/session-menu)
-   :sep
-   ;; Frame
-   '("◐" "Toggle transparency" init/toggle-frame-transparency)))
+  "Build left utility and right project sections of the global toolbar."
+  (let* ((utilities
+          (init/toolbar-string
+           '("PDF" "Find a PDF below ~/Documents" init/doc-toolbar-find-pdf)
+           '("◴" "Open a recent file" recentf-open-files)
+           '("⌂" "Open ~/Documents in Dired" init/doc-toolbar-open-documents)
+           '("✱" "Open the persistent scratch buffer" init/doc-toolbar-open-scratch)
+           :sep
+           '("=" "Open Calc" calc)
+           '("▣" "Open Calendar" calendar)
+           '("☷" "Open the process viewer" proced)
+           :sep
+           '("↻" "Reload the Emacs configuration" init/reload-config)
+           '("⏻" "Restart Emacs" init/doc-toolbar-restart-emacs)))
+         ;; Remove this section's right-fringe fill; the shared alignment
+         ;; spacer below fills the gap between the two sections instead.
+         (utilities (substring utilities 0 -1))
+         (projects
+          (apply
+           #'init/toolbar-string
+           (reverse
+            (list
+             ;; Run & build
+             '("▶" "Run project (last run command)" init/project-run)
+             '("⚙" "Build project (last build command)" init/project-build)
+             '("⇄" "Switch what run/build executes" init/project-command-switch)
+             '("＋" "Add a project command" init/project-command-add)
+             :sep
+             ;; Project
+             '("❒" "Open project" projectile-switch-project)
+             '("▤" "Find file in project" projectile-find-file)
+             '("⌕" "Project search" init/project-search)
+             :sep
+             ;; Tools
+             '("⎇" "Magit status" magit-status)
+             '("❯" "Project eshell" project-eshell)
+             '("▦" "Toggle project panel" init/project-panel-toggle)
+             '("⧉" "Sessions" init/session-menu)
+             :sep
+             ;; Frame
+             '("◐" "Toggle transparency" init/toggle-frame-transparency)))))
+         (spacer
+          (propertize
+           " "
+           'display `(space :align-to (- right-fringe ,(string-width projects)))
+           'face '((:height 1.0) init/toolbar-border))))
+    (concat utilities spacer projects)))
 
 (defun init/doc-toolbar--window ()
   "Return the live toolbar-bar window, or nil."
@@ -74,8 +138,7 @@
         (insert (init/doc-toolbar--toolbar)))
       (setq-local mode-line-format nil
                   cursor-type nil
-                  buffer-read-only t
-                  window-size-fixed 'height))
+                  buffer-read-only t))
     buffer))
 
 (defun init/doc-toolbar--show ()
@@ -96,6 +159,13 @@
         (set-window-parameter window 'no-delete-other-windows t)
         (set-window-parameter window 'mode-line-format 'none)
         (set-window-dedicated-p window t)
+        ;; A nominal one-line window can clip the toolbar face's bottom
+        ;; border.  Fit the actual rendered line in pixels before fixing
+        ;; and preserving the window height.
+        (let ((window-resize-pixelwise t))
+          (fit-window-to-buffer window 2 1 nil nil t))
+        (with-current-buffer (window-buffer window)
+          (setq-local window-size-fixed 'height))
         window))))
 
 (defun init/doc-toolbar--hide ()

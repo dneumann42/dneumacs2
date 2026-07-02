@@ -8,7 +8,7 @@
 
 (defvar init/frame-alpha-opaque 100
   "Alpha-background value representing a fully opaque frame.")
-(defvar init/frame-alpha-translucent 85
+(defvar init/frame-alpha-translucent 95
   "Alpha-background value used for translucent frames.")
 (defvar init/compilation-frame nil
   "The live child frame displaying the compilation buffer, or nil.")
@@ -339,15 +339,52 @@ under lisp/ from `features' first makes those requires re-load in order."
 
 ;;;; Package configuration
 
+(defvar init/wallust-theme-watch-timer nil
+  "Timer that checks whether Wallust replaced its generated theme.")
+
+(defvar init/wallust-theme-modification-time nil
+  "Last observed modification time of the generated Wallust theme.")
+
+(defun init/wallust-theme-file ()
+  "Return the generated Wallust theme filename."
+  (expand-file-name "themes/wallust-theme.el" user-emacs-directory))
+
+(defun init/reload-wallust-theme-if-active ()
+  "Reload the generated Wallust theme without changing the selected theme."
+  (when (custom-theme-enabled-p 'wallust)
+    (disable-theme 'wallust)
+    (load-theme 'wallust t)))
+
+(defun init/check-wallust-theme-file ()
+  "Reload the active Wallust theme after its generated file changes."
+  (when-let* ((attributes (file-attributes (init/wallust-theme-file)))
+              (modification-time (file-attribute-modification-time attributes)))
+    (unless (equal modification-time init/wallust-theme-modification-time)
+      (prog1
+          (when init/wallust-theme-modification-time
+            (init/reload-wallust-theme-if-active))
+        (setq init/wallust-theme-modification-time modification-time)))))
+
+(defun init/watch-wallust-theme ()
+  "Poll Wallust's theme file so atomic replacements are detected reliably."
+  (unless (timerp init/wallust-theme-watch-timer)
+    (setq init/wallust-theme-modification-time
+          (when-let ((attributes (file-attributes (init/wallust-theme-file))))
+            (file-attribute-modification-time attributes)))
+    (setq init/wallust-theme-watch-timer
+          (run-with-timer 1 1 #'init/check-wallust-theme-file))))
+
 (use-package emacs
   :ensure nil
   :init
   (add-to-list 'custom-theme-load-path
                (expand-file-name "themes" user-emacs-directory))
+  (init/watch-wallust-theme)
   (tool-bar-mode -1)
   (menu-bar-mode -1)
   (scroll-bar-mode -1)
-  (load-theme 'some-nice-colors t)
+  ;; (load-theme 'some-nice-colors t)
+  (load-theme 'wallust t)
   (electric-pair-mode 1)
   ;; Keep point near the window edge instead of recentering when wheel
   ;; scrolling moves it outside the visible portion of the buffer.

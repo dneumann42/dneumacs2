@@ -38,6 +38,11 @@
   "Face for informational toolbar segments."
   :group 'convenience)
 
+(defface init/toolbar-border
+  '((t :inherit shadow :box (:line-width -1)))
+  "Face used to draw the full-width edge of a toolbar."
+  :group 'convenience)
+
 (defun init/toolbar--help-echo (help command)
   "Return a `help-echo' function combining HELP with COMMAND's keybinding.
 The key is looked up when the tooltip is shown, in the hovered window's
@@ -142,21 +147,33 @@ MENU is an easy-menu item list; HELP is the tooltip."
 (defun init/toolbar-string (&rest items)
   "Compose ITEMS into a toolbar string.
 See the Commentary for the accepted item forms."
-  (concat
-   " "
-   (mapconcat
-    #'identity
-    (delq nil
-          (mapcar (lambda (item)
-                    (cond
-                     ((null item) nil)
-                     ((eq item :sep) (init/toolbar-separator))
-                     ((stringp item) item)
-                     ((functionp item) (funcall item))
-                     ((listp item) (apply #'init/toolbar-button item))
-                     (t (error "Unknown toolbar item: %S" item))))
-                  items))
-    " ")))
+  (let ((toolbar
+         (concat
+          " "
+          (mapconcat
+           #'identity
+           (delq nil
+                 (mapcar (lambda (item)
+                           (cond
+                            ((null item) nil)
+                            ((eq item :sep) (init/toolbar-separator))
+                            ((stringp item) item)
+                            ((functionp item) (funcall item))
+                            ((listp item) (apply #'init/toolbar-button item))
+                            (t (error "Unknown toolbar item: %S" item))))
+                         items))
+           " ")
+          ;; Fill the remainder of either a header line or the dedicated
+          ;; toolbar window, so the border spans the complete bar.  The
+          ;; taller invisible space adds vertical padding to the line box;
+          ;; unlike a thicker `:box', it does not enlarge the border.
+          (propertize " " 'display
+                      '(space :align-to right-fringe :height 1.2 :ascent 80)))))
+    ;; Keep every segment at the same height and draw a bar edge rather
+    ;; than underlining the text itself.
+    (add-face-text-property 0 (length toolbar) '(:height 1.0) nil toolbar)
+    (add-face-text-property 0 (length toolbar) 'init/toolbar-border t toolbar)
+    toolbar))
 
 (defvar-local init/toolbar--function nil
   "Function producing this buffer's header-line toolbar.")
