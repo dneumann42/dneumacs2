@@ -20,6 +20,18 @@
   "Key sequence for toggling the project panel.")
 (defconst bind/doc-toolbar "C-c T"
   "Key sequence for toggling the document toolbar.")
+
+;;;; Project run/build commands
+;; Top-row F keys, chosen to avoid the taken ones: <f5> compile /
+;; ide-run, <f6>/<S-f6>/<f7> ide tests, <f9> ide debug.
+(defconst bind/project-run "<f2>"
+  "Key sequence for running the project's run command.")
+(defconst bind/project-build "<f3>"
+  "Key sequence for running the project's build command.")
+(defconst bind/project-command-switch "<f4>"
+  "Key sequence for switching what run/build executes.")
+(defconst bind/project-command-add "<f8>"
+  "Key sequence for registering a new project command.")
 (defconst bind/session-menu "C-c S"
   "Key sequence for opening the session menu.")
 

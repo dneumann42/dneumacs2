@@ -19,6 +19,7 @@
 (require 'init-lsp)
 (require 'scheme-tools)
 (require 'project-tools)
+(require 'project-commands)
 (require 'project-panel)
 (require 'sessions)
 (require 'bm-setup)

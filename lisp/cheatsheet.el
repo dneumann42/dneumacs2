@@ -217,6 +217,13 @@ Interactively, prompt with completion over the registered cheatsheets."
     (projectile-ripgrep "Search the project (ripgrep)")
     (projectile-grep    "Search the project (grep)")
     (projectile-replace "Replace across the project"))
+  '("Run & build (saved per project, toolbar ▶ ⚙ ⇄ ＋)"
+    (init/project-run            "Run the project's run command")
+    (init/project-build          "Run the project's build command")
+    (init/project-command-switch "Switch what run/build executes")
+    (init/project-command-add    "Register a new project command")
+    (:note "Commands live in .project-commands.eld at the project root.")
+    (:note "Output opens in the floating panel; it accepts program input."))
   '("Build / run / test"
     (projectile-compile-project "Compile the project")
     (projectile-run-project     "Run the project")

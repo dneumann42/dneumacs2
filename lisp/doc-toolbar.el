@@ -20,6 +20,10 @@
 
 (require 'toolbar)
 
+(declare-function init/project-run "project-commands")
+(declare-function init/project-build "project-commands")
+(declare-function init/project-command-switch "project-commands")
+(declare-function init/project-command-add "project-commands")
 (declare-function projectile-switch-project "projectile")
 (declare-function projectile-find-file "projectile")
 (declare-function magit-status "magit")
@@ -35,6 +39,12 @@
 (defun init/doc-toolbar--toolbar ()
   "Build the global toolbar."
   (init/toolbar-string
+   ;; Run & build
+   '("▶" "Run project (last run command)" init/project-run)
+   '("⚙" "Build project (last build command)" init/project-build)
+   '("⇄" "Switch what run/build executes" init/project-command-switch)
+   '("＋" "Add a project command" init/project-command-add)
+   :sep
    ;; Project
    '("❒" "Open project" projectile-switch-project)
    '("▤" "Find file in project" projectile-find-file)
