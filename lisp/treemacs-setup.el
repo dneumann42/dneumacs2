@@ -116,10 +116,6 @@
 (declare-function treemacs-pulse-on-success "treemacs-logging")
 (declare-function treemacs-pulse-on-failure "treemacs-logging")
 
-(defface init/treemacs-button
-  '((t :inherit font-lock-keyword-face :weight bold))
-  "Face for the clickable buttons at the top of the Treemacs buffer.")
-
 (defun init/treemacs--editor-buffer ()
   "Return the most recently active file-visiting buffer outside Treemacs."
   (seq-find (lambda (buf)
@@ -145,49 +141,15 @@
              "%s is not under any Treemacs project."
              (propertize file 'face 'font-lock-string-face)))))))))
 
-(defun init/treemacs--button-keymap (on-click)
-  "Return a keymap running ON-CLICK on a header-line `mouse-1' click."
-  (let ((m (make-sparse-keymap)))
-    (define-key m [header-line mouse-1] on-click)
-    m))
-
-(defun init/treemacs--button (label help command)
-  "Return a clickable header-line LABEL string running COMMAND."
-  (propertize
-   label
-   'help-echo help 'mouse-face 'highlight 'face 'init/treemacs-button 'pointer 'hand
-   'local-map (init/treemacs--button-keymap
-               (lambda (event)
-                 (interactive "e")
-                 (with-selected-window (posn-window (event-start event))
-                   (call-interactively command))))))
-
-(defun init/treemacs--menu-button (label help menu)
-  "Return a clickable header-line LABEL string that pops up MENU."
-  (propertize
-   label
-   'help-echo help 'mouse-face 'highlight 'face 'init/treemacs-button 'pointer 'hand
-   'local-map (init/treemacs--button-keymap
-               (lambda (event)
-                 (interactive "e")
-                 (let* ((km (easy-menu-create-menu nil menu))
-                        (choice (x-popup-menu event km)))
-                   (when choice
-                     (let ((cmd (lookup-key km (apply #'vector choice))))
-                       (when (commandp cmd)
-                         (with-selected-window (posn-window (event-start event))
-                           (call-interactively cmd))))))))))
-
 (defun init/treemacs--buttons-string ()
   "Build the sticky Treemacs toolbar row for the header line."
-  (concat
-   " "
-   (init/treemacs--button "⌖" "Focus current file" #'init/treemacs-focus-current-file) " "
-   (init/treemacs--button "⟳" "Refresh" #'treemacs-refresh) " "
-   (init/treemacs--button "⊟" "Collapse all" #'treemacs-collapse-all-projects) " "
-   (init/treemacs--button "＋" "Add project" #'treemacs-add-project-to-workspace) " "
-   (init/treemacs--button "?" "Treemacs help" #'treemacs-common-helpful-hydra) "  "
-   (init/treemacs--menu-button
+  (init/toolbar-string
+   '("⌖" "Focus current file" init/treemacs-focus-current-file)
+   '("⟳" "Refresh" treemacs-refresh)
+   '("⊟" "Collapse all" treemacs-collapse-all-projects)
+   '("＋" "Add project" treemacs-add-project-to-workspace)
+   '("?" "Treemacs help" treemacs-common-helpful-hydra)
+   (init/toolbar-menu-button
     "❏" "Workspaces: switch / create / edit"
     '(["Switch Workspace…" treemacs-switch-workspace]
       ["Next Workspace"    treemacs-next-workspace]

@@ -134,51 +134,41 @@ password.  PDFs opened in the meantime display once the build ends."
         (init/pdf-open))))
   (setq init/pdf--build-pending-buffers nil))
 
+;;;; Persistent, theme-aware dark (midnight) rendering
+
+(defcustom init/pdf-midnight-enabled nil
+  "Whether PDFs render in dark (midnight) mode.
+Toggled by `init/pdf-toggle-midnight' and saved via Customize, so the
+choice survives restarts."
+  :type 'boolean
+  :group 'pdf-tools)
+
+(defun init/pdf--theme-midnight-colors ()
+  "Return (FOREGROUND . BACKGROUND) taken from the current theme."
+  (cons (face-attribute 'default :foreground nil t)
+        (face-attribute 'default :background nil t)))
+
+(defun init/pdf-toggle-midnight ()
+  "Toggle dark rendering for PDFs and remember the choice.
+The rendering colors come from the active theme, and the on/off state
+persists across sessions."
+  (interactive)
+  (let ((enable (not (bound-and-true-p pdf-view-midnight-minor-mode))))
+    (setq pdf-view-midnight-colors (init/pdf--theme-midnight-colors))
+    (pdf-view-midnight-minor-mode (if enable 1 -1))
+    (customize-save-variable 'init/pdf-midnight-enabled enable)
+    (message "PDF dark mode %s (persisted)" (if enable "on" "off"))))
+
 ;;;; Toolbar (fixed header line, like the Treemacs buttons)
-
-(defface init/pdf-toolbar-button
-  '((t :inherit font-lock-keyword-face :weight bold))
-  "Face for the clickable buttons in the PDF toolbar."
-  :group 'pdf-tools)
-
-(defface init/pdf-toolbar-info
-  '((t :inherit shadow))
-  "Face for non-button text in the PDF toolbar."
-  :group 'pdf-tools)
-
-(defun init/pdf--toolbar-keymap (command)
-  "Return a keymap running COMMAND on a header-line mouse-1 click."
-  (let ((map (make-sparse-keymap)))
-    (define-key map [header-line mouse-1]
-                (lambda (event)
-                  (interactive "e")
-                  (with-selected-window (posn-window (event-start event))
-                    (call-interactively command))))
-    map))
-
-(defun init/pdf--button (label help command)
-  "Return a clickable toolbar LABEL running COMMAND.  HELP is the tooltip."
-  (propertize label
-              'help-echo help
-              'mouse-face 'highlight
-              'pointer 'hand
-              'face 'init/pdf-toolbar-button
-              'local-map (init/pdf--toolbar-keymap command)))
-
-(defun init/pdf--toolbar-sep ()
-  "Return the group separator used in the PDF toolbar."
-  (propertize "  │  " 'face 'init/pdf-toolbar-info))
 
 (defun init/pdf--page-indicator ()
   "Return a clickable current-page/page-count indicator."
-  (let ((pages (ignore-errors (pdf-cache-number-of-pages))))
-    (propertize (format " %d/%s "
-                        (or (ignore-errors (pdf-view-current-page)) 0)
-                        (or pages "?"))
-                'help-echo "mouse-1: go to page…"
-                'mouse-face 'highlight
-                'face 'init/pdf-toolbar-info
-                'local-map (init/pdf--toolbar-keymap #'pdf-view-goto-page))))
+  (init/toolbar-info
+   (format "%d/%s"
+           (or (ignore-errors (pdf-view-current-page)) 0)
+           (or (ignore-errors (pdf-cache-number-of-pages)) "?"))
+   "mouse-1: go to page…"
+   #'pdf-view-goto-page))
 
 (defun init/pdf-open-externally ()
   "Open the current PDF in the system's default viewer."
@@ -189,45 +179,45 @@ password.  PDFs opened in the meantime display once the build ends."
 
 (defun init/pdf--toolbar ()
   "Build the PDF toolbar shown in the header line."
-  (concat
-   " "
+  (init/toolbar-string
    ;; Navigation
-   (init/pdf--button "⇤" "First page" #'pdf-view-first-page) " "
-   (init/pdf--button "◀" "Previous page" #'pdf-view-previous-page-command)
-   (init/pdf--page-indicator)
-   (init/pdf--button "▶" "Next page" #'pdf-view-next-page-command) " "
-   (init/pdf--button "⇥" "Last page" #'pdf-view-last-page)
-   (init/pdf--toolbar-sep)
+   '("⇤" "First page" pdf-view-first-page)
+   '("◀" "Previous page" pdf-view-previous-page-command)
+   #'init/pdf--page-indicator
+   '("▶" "Next page" pdf-view-next-page-command)
+   '("⇥" "Last page" pdf-view-last-page)
+   :sep
    ;; History
-   (init/pdf--button "↶" "Jump back (history)" #'pdf-history-backward) " "
-   (init/pdf--button "↷" "Jump forward (history)" #'pdf-history-forward)
-   (init/pdf--toolbar-sep)
+   '("↶" "Jump back (history)" pdf-history-backward)
+   '("↷" "Jump forward (history)" pdf-history-forward)
+   :sep
    ;; Zoom and fit
-   (init/pdf--button "−" "Zoom out" #'pdf-view-shrink) " "
-   (init/pdf--button "＋" "Zoom in" #'pdf-view-enlarge) " "
-   (init/pdf--button "⊙" "Reset zoom" #'pdf-view-scale-reset) " "
-   (init/pdf--button "↔" "Fit page width" #'pdf-view-fit-width-to-window) " "
-   (init/pdf--button "↕" "Fit whole page" #'pdf-view-fit-page-to-window)
-   (init/pdf--toolbar-sep)
+   '("−" "Zoom out" pdf-view-shrink)
+   '("＋" "Zoom in" pdf-view-enlarge)
+   '("⊙" "Reset zoom" pdf-view-scale-reset)
+   '("↔" "Fit page width" pdf-view-fit-width-to-window)
+   '("↕" "Fit whole page" pdf-view-fit-page-to-window)
+   :sep
    ;; View
-   (init/pdf--button "⟳" "Rotate 90°" #'pdf-view-rotate) " "
-   (init/pdf--button "▣" "Toggle margin trimming (auto slice)"
-                     #'pdf-view-auto-slice-minor-mode) " "
-   (init/pdf--button "◐" "Toggle dark (midnight) rendering"
-                     #'pdf-view-midnight-minor-mode)
-   (init/pdf--toolbar-sep)
+   '("⟳" "Rotate 90°" pdf-view-rotate)
+   '("▣" "Toggle margin trimming (auto slice)" pdf-view-auto-slice-minor-mode)
+   '("◐" "Toggle dark rendering (persists)" init/pdf-toggle-midnight)
+   :sep
    ;; Tools
-   (init/pdf--button "☰" "Outline / table of contents" #'pdf-outline) " "
-   (init/pdf--button "⌕" "Search the document (occur)" #'pdf-occur) " "
-   (init/pdf--button "✎" "Highlight the selected text"
-                     #'pdf-annot-add-highlight-markup-annotation) " "
-   (init/pdf--button "❝" "Add a note at point" #'pdf-annot-add-text-annotation) " "
-   (init/pdf--button "≡" "List annotations" #'pdf-annot-list-annotations) " "
-   (init/pdf--button "⇗" "Open in the system viewer" #'init/pdf-open-externally)))
+   '("☰" "Outline / table of contents" pdf-outline)
+   '("⌕" "Search the document (occur)" pdf-occur)
+   '("✎" "Highlight the selected text" pdf-annot-add-highlight-markup-annotation)
+   '("❝" "Add a note at point" pdf-annot-add-text-annotation)
+   '("≡" "List annotations" pdf-annot-list-annotations)
+   '("⇗" "Open in the system viewer" init/pdf-open-externally)))
 
 (defun init/pdf-view-setup ()
-  "Per-buffer setup for pdf-view: toolbar and comfort settings."
-  (setq-local header-line-format '(:eval (init/pdf--toolbar)))
+  "Per-buffer setup for pdf-view: toolbar, dark mode, comfort settings."
+  (init/toolbar-attach #'init/pdf--toolbar)
+  ;; Restore the persisted dark-mode choice with theme colors.
+  (when init/pdf-midnight-enabled
+    (setq pdf-view-midnight-colors (init/pdf--theme-midnight-colors))
+    (pdf-view-midnight-minor-mode 1))
   ;; The blinking bar cursor is pointless on a rendered page.
   (setq-local cursor-type nil))
 

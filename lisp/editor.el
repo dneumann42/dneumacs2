@@ -271,40 +271,29 @@ Adjusts `tab-bar-lines' (safe with a side window open) rather than toggling
            (if (eq init/menu-bar-override 'on) "shown" "hidden")))
 
 (declare-function treemacs "treemacs")
-(declare-function projectile-switch-project "projectile")
-(declare-function projectile-find-file "projectile")
-(declare-function magit-status "magit")
 (declare-function org-capture "org-capture")
-(declare-function project-eshell "project")
-(declare-function consult-ripgrep "consult")
-(declare-function init/project-search "project-tools")
-(declare-function init/project-panel-toggle "project-panel")
-(declare-function init/session-menu "sessions")
+(declare-function init/doc-toolbar-mode "doc-toolbar")
 
 (defun init/modeline-button (glyph help command)
-  "Return a clickable mode-line segment showing GLYPH that runs COMMAND."
+  "Return a clickable mode-line segment showing GLYPH that runs COMMAND.
+The tooltip includes COMMAND's current keybinding, looked up in the
+hovered window's buffer when the tooltip is shown."
   (propertize
    (format " %s " glyph)
-   'help-echo (concat "mouse-1: " help)
+   'help-echo (init/toolbar--help-echo help command)
    'mouse-face 'mode-line-highlight
    'local-map (let ((map (make-sparse-keymap)))
                 (define-key map [mode-line mouse-1] command)
                 map)))
 
 (defun init/modeline-buttons ()
-  "Return the clickable button strip shown in the mode line."
+  "Return the clickable button strip shown in the mode line.
+The project and session tools live in the document toolbar (⚒)."
   (concat
    (init/modeline-button "☰" "Toggle menu bar" #'init/toggle-menu-bar)
+   (init/modeline-button "⚒" "Toggle toolbar" #'init/doc-toolbar-mode)
    (init/modeline-button "◧" "Toggle Treemacs" #'treemacs)
-   (init/modeline-button "❒" "Open project" #'projectile-switch-project)
-   (init/modeline-button "▦" "Toggle project panel" #'init/project-panel-toggle)
-   (init/modeline-button "⧉" "Sessions" #'init/session-menu)
-   (init/modeline-button "⎇" "Magit status" #'magit-status)
-   (init/modeline-button "❯" "Project eshell" #'project-eshell)
-   (init/modeline-button "✎" "Org capture" #'org-capture)
-   (init/modeline-button "◐" "Toggle transparency" #'init/toggle-frame-transparency)
-   (init/modeline-button "▤" "Find file in project" #'projectile-find-file)
-   (init/modeline-button "⌕" "Project search" #'init/project-search)))
+   (init/modeline-button "✎" "Org capture" #'org-capture)))
 
 ;;;; Misc editor commands and helpers
 

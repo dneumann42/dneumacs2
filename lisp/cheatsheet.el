@@ -285,6 +285,7 @@ Interactively, prompt with completion over the registered cheatsheets."
     (cheatsheet-show    "Open a cheatsheet"))
   '("Frame & UI"
     (init/toggle-menu-bar          "Show / hide the menu bar")
+    (init/doc-toolbar-mode         "Toggle the global toolbar (⚒)")
     (init/toggle-frame-transparency "Toggle frame transparency"))
   '("Sessions (also ⧉ in the mode line)"
     (init/session-menu "Session menu: new / load / save / delete")
@@ -318,7 +319,15 @@ Interactively, prompt with completion over the registered cheatsheets."
     (:keys "W / H / P" "Fit width / height / page")
     (:keys "o"       "Outline (table of contents)")
     (:keys "C-s"     "Search inside the PDF")
-    (:note "First PDF open offers to build the epdfinfo helper.")))
+    (:note "First PDF open offers to build the epdfinfo helper."))
+  '("Web (EWW, toolbar at the top)"
+    (eww       "Open a URL or search the web (DuckDuckGo)")
+    (ddg       "Search DuckDuckGo (region / symbol at point)")
+    (:keys "j" "Jump to the main content")
+    (:keys "R" "Readable view (article only)")
+    (:keys "l / r" "Back / forward")
+    (:keys "b / B" "Bookmark page / list bookmarks")
+    (:keys "&" "Open the page in the external browser")))
 
 (provide 'cheatsheet)
 ;;; cheatsheet.el ends here
