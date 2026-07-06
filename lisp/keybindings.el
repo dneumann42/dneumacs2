@@ -20,6 +20,10 @@
   "Key sequence for toggling the project panel.")
 (defconst bind/doc-toolbar "C-c T"
   "Key sequence for toggling the document toolbar.")
+(defconst bind/theme-preview "C-c M-t"
+  "Key sequence for previewing and selecting an installed theme.")
+(defconst bind/theme-gallery "C-c M-T"
+  "Key sequence for installing a theme from EmacsThemes.")
 
 ;;;; Project run/build commands
 ;; Top-row F keys, chosen to avoid the taken ones: <f5> compile /

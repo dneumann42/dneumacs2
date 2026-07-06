@@ -1,5 +1,8 @@
 ;;; init-org.el --- Org mode configuration -*- lexical-binding: t; -*-
 
+(require 'font-tools)
+(require 'org-sync)
+
 ;; Org itself is deferred: the use-package block below autoloads it on
 ;; the first Org buffer, agenda, or capture.  Everything at top level
 ;; here must work without Org loaded.
@@ -30,48 +33,21 @@
               "EBGaramond-SemiBoldItalic.ttf")))
   "Font files to download for the Org writer font, as (FILE . URL).")
 
-(defvar init/org-writer-font-asked nil
-  "Non-nil once the user has been asked to install the writer font.")
-
-(defun init/org-writer-font-installed-p ()
-  "Return non-nil when the writer font files are present on disk."
-  (file-expand-wildcards
-   (expand-file-name "EBGaramond*.ttf" "~/.local/share/fonts/")))
-
 (defun init/org-install-writer-font ()
   "Download EB Garamond into the user font directory."
-  (let ((font-dir (expand-file-name "~/.local/share/fonts/")))
-    (make-directory font-dir t)
-    (dolist (entry init/org-writer-font-files)
-      (let ((target (expand-file-name (car entry) font-dir)))
-        (unless (zerop (call-process "curl" nil nil nil
-                                     "-L" "--fail" "--silent" "--show-error"
-                                     "--output" target (cdr entry)))
-          (error "Failed to download %s" (car entry)))))
-    (init/reset-font-cache)
-    t))
+  (init/font-install-files init/org-writer-font-files))
 
 (defun init/org-ensure-writer-font ()
   "Return an available writer font family, offering to install one.
-Mirrors the Cascadia install flow: on Linux, ask once per session and
-download into ~/.local/share/fonts.  Returns nil when unavailable."
-  (or (init/font-available-p init/org-writer-font-families)
-      (and (init/org-writer-font-installed-p)
-           init/org-writer-font-family)
-      (when (and (eq system-type 'gnu/linux)
-                 (display-graphic-p)
-                 (not init/org-writer-font-asked))
-        (setq init/org-writer-font-asked t)
-        (when (y-or-n-p "EB Garamond (Org writing font) is missing. Download and install it? ")
-          (condition-case err
-              (progn
-                (init/org-install-writer-font)
-                (or (init/font-available-p init/org-writer-font-families)
-                    init/org-writer-font-family))
-            (error
-             (message "Writer font install failed: %s"
-                      (error-message-string err))
-             nil))))))
+Uses the shared font installation flow and returns nil when unavailable."
+  (init/font-ensure
+   'org-writer
+   :families init/org-writer-font-families
+   :file-patterns '("EBGaramond*.ttf")
+   :default-family init/org-writer-font-family
+   :prompt "EB Garamond (Org writing font) is missing. Download and install it? "
+   :installer #'init/org-install-writer-font
+   :require-graphic t))
 
 (defvar-local init/org--writer-font-remap nil
   "Face-remap cookie for the writer font in the current Org buffer.")
@@ -157,9 +133,9 @@ has a statistics cookie."
          ("C-c j" . init/org-goto-journal)
          ("C-c l" . org-store-link))
   :custom
-  (org-directory "~/.org")
+  (org-directory init/org-sync-directory)
   ;; Scan the whole org directory for TODOs, SCHEDULED and DEADLINE items.
-  (org-agenda-files (list "~/.org"))
+  (org-agenda-files (list init/org-sync-directory))
   ;; Record a timestamp when a task is marked DONE.
   (org-log-done 'time)
   ;; Start the agenda on the current day and show one week.

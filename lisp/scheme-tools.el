@@ -16,12 +16,67 @@
 
 ;;;; Geiser and package setup
 
+(let* ((wikid-source (expand-file-name "~/.projects/wikid/src"))
+       (guile-load-path (getenv "GUILE_LOAD_PATH"))
+       (load-paths (and guile-load-path
+                        (split-string guile-load-path path-separator t))))
+  (unless (member wikid-source load-paths)
+    (setenv "GUILE_LOAD_PATH"
+            (if guile-load-path
+                (concat wikid-source path-separator guile-load-path)
+              wikid-source))))
+
 (use-package geiser
   :ensure t
   :defer t
   :custom
   (geiser-active-implementations '(guile chicken))
+  (geiser-debug-jump-to-debug nil)
+  (geiser-debug-show-debug t)
   (geiser-repl-history-filename "~/.emacs.d/geiser-history"))
+
+(defun my/geiser--persist-project-implementation (implementation)
+  "Save IMPLEMENTATION as the Scheme implementation for the current Git repo."
+  (when-let* ((source-location (or buffer-file-name default-directory))
+              (root (locate-dominating-file source-location ".git"))
+              (locals-file (expand-file-name dir-locals-file root)))
+    (let* ((existing-buffer (get-file-buffer locals-file))
+           (locals-buffer existing-buffer))
+      (if (and existing-buffer (buffer-modified-p existing-buffer))
+          (message "Geiser: not updating %s because it has unsaved changes"
+                   locals-file)
+        (unwind-protect
+            (save-current-buffer
+              (save-window-excursion
+                (require 'files-x)
+                (add-dir-local-variable
+                 'scheme-mode 'geiser-scheme-implementation implementation
+                 locals-file)
+                (setq locals-buffer (get-file-buffer locals-file))
+                (with-current-buffer locals-buffer
+                  (save-buffer)))
+              (dolist (buffer (buffer-list))
+                (with-current-buffer buffer
+                  (when (and buffer-file-name
+                             (derived-mode-p 'scheme-mode)
+                             (file-in-directory-p buffer-file-name root))
+                    (setq-local geiser-scheme-implementation implementation))))
+              (message "Geiser: saved %s for Scheme files under %s"
+                       implementation (abbreviate-file-name root)))
+          (when (and locals-buffer (not existing-buffer))
+            (kill-buffer locals-buffer)))))))
+
+(defun my/geiser--remember-prompted-implementation (implementation)
+  "Remember a prompted Geiser IMPLEMENTATION for the current Git repo."
+  (when implementation
+    (my/geiser--persist-project-implementation implementation))
+  implementation)
+
+(with-eval-after-load 'geiser-impl
+  (unless (advice-member-p #'my/geiser--remember-prompted-implementation
+                           'geiser-impl--read-impl)
+    (advice-add 'geiser-impl--read-impl :filter-return
+                #'my/geiser--remember-prompted-implementation)))
 
 (with-eval-after-load 'geiser-repl
   ;; geiser-chicken has no debugger prompt.  Geiser 20260509 still tries

@@ -2,7 +2,7 @@
 
 (require 'cl-lib)
 (require 'subr-x)
-(require 'url)
+(require 'font-tools)
 
 ;;;; State variables
 
@@ -14,8 +14,6 @@
   "The live child frame displaying the compilation buffer, or nil.")
 (defvar init/font-size 13
   "Default font size in points for the UI font.")
-(defvar init/font-install-asked nil
-  "Non-nil once the user has been asked to install the Cascadia font.")
 (defvar init/pending-font-family nil
   "Font family awaiting application once a graphical frame is ready.")
 (defvar init/font-apply-retried nil
@@ -46,23 +44,12 @@
     "Iosevka Nerd Font"
     "Iosevka")
   "Family names to probe for an installed Iosevka font as a fallback.")
-(defun init/font-available-p (families)
-  "Return the first available font family from FAMILIES."
-  (cl-find-if (lambda (family)
-                (cl-find-if (lambda (installed)
-                              (string-match-p (regexp-quote family) installed))
-                            (font-family-list)))
-              families))
-
-(defun init/cascadia-font-installed-p ()
-  "Return non-nil when the Cascadia font files are present on disk."
-  (let ((font-dir (expand-file-name "~/.local/share/fonts/")))
-    (cl-some (lambda (pattern)
-               (file-expand-wildcards (expand-file-name pattern font-dir)))
-             '("CaskaydiaCoveNerdFont*.ttf"
-               "CaskaydiaCoveNerdFont*.otf"
-               "CascadiaCodeNerdFont*.ttf"
-               "CascadiaCodeNerdFont*.otf"))))
+(defconst init/cascadia-font-files
+  '("CaskaydiaCoveNerdFont*.ttf"
+    "CaskaydiaCoveNerdFont*.otf"
+    "CascadiaCodeNerdFont*.ttf"
+    "CascadiaCodeNerdFont*.otf")
+  "File patterns identifying an installed Cascadia Nerd Font.")
 
 (defun init/apply-font-family (family)
   "Apply FAMILY as the default font for current and future frames."
@@ -94,57 +81,21 @@
       (setq init/pending-font-family nil)
       (init/apply-font-family-now family))))
 
-(defun init/reset-font-cache ()
-  "Refresh Emacs and system font caches after a font install."
-  (when (fboundp 'clear-font-cache)
-    (clear-font-cache))
-  (when (eq system-type 'gnu/linux)
-    (let ((status (call-process "fc-cache" nil nil nil "-f" "-r")))
-      (unless (and (integerp status) (zerop status))
-        (message "Font cache refresh failed with status %s" status)))))
-
 (defun init/install-cascadia-font ()
   "Download and install Cascadia Nerd Font into the user font directory."
-  (let* ((font-dir (expand-file-name "~/.local/share/fonts/"))
-         (zip-file (expand-file-name "CascadiaCode.zip" temporary-file-directory)))
-    (make-directory font-dir t)
-    (when (file-exists-p zip-file)
-      (delete-file zip-file))
-    (unless (zerop (call-process "curl" nil nil nil
-                                 "-L" "--fail" "--silent" "--show-error"
-                                 "--output" zip-file
-                                 init/cascadia-font-url))
-      (error "Failed to download Cascadia font"))
-    (unwind-protect
-        (progn
-          (unless (zerop (call-process "unzip" nil nil nil "-oq" zip-file "-d" font-dir))
-            (error "Failed to extract Cascadia font"))
-          (init/reset-font-cache)
-          t)
-      (when (file-exists-p zip-file)
-        (delete-file zip-file)))))
+  (init/font-install-zip init/cascadia-font-url "CascadiaCode.zip"))
 
 (defun init/ensure-default-font ()
   "Use Cascadia when available, or install it on Linux if requested."
-  (let ((family (or (init/font-available-p init/cascadia-font-families)
-                    (and (init/cascadia-font-installed-p)
-                         init/cascadia-default-family))))
-    (unless family
-      (when (and (eq system-type 'gnu/linux)
-                 (not init/font-install-asked))
-        (setq init/font-install-asked t)
-        (when (y-or-n-p "Cascadia font is missing. Download and install it? ")
-          (condition-case err
-              (progn
-                (init/install-cascadia-font)
-                (setq family (or (init/font-available-p init/cascadia-font-families)
-                                 (and (init/cascadia-font-installed-p)
-                                      init/cascadia-default-family))))
-            (error
-             (message "Cascadia font install failed: %s"
-                      (error-message-string err)))))))
-    (unless family
-      (setq family (init/font-available-p init/iosevka-font-families)))
+  (let ((family
+         (init/font-ensure
+          'cascadia
+          :families init/cascadia-font-families
+          :file-patterns init/cascadia-font-files
+          :default-family init/cascadia-default-family
+          :prompt "Cascadia font is missing. Download and install it? "
+          :installer #'init/install-cascadia-font
+          :fallback-families init/iosevka-font-families)))
     (when family
       (init/apply-font-family family))))
 
@@ -227,27 +178,49 @@ the cheatsheet Guides menu)."
    ((keymapp binding)
     (cons (or (keymap-prompt binding) "Menu") binding))))
 
+(defconst init/tab-bar-menu-groups
+  '((file "File" file buffer projectile)
+    (edit "Edit" edit text table)
+    (org "Org" agenda org headings show hide)
+    (tools "Tools" tools options help-menu)
+    (guides "Guides" cheatsheet-guides))
+  "Top-level menu groups rendered in the tab bar.
+Each entry is (KEY LABEL MENU-KEY...), where the remaining keys name
+existing mode-sensitive menu-bar menus that become submenus.")
+
+(defun init/tab-bar--group-menu (label members entries)
+  "Build a menu named LABEL from MEMBER keys found in ENTRIES."
+  (let ((menu (make-sparse-keymap label)))
+    ;; `define-key' prepends menu entries, hence the reverse iteration.
+    (dolist (member (reverse members))
+      (when-let ((entry (alist-get member entries)))
+        (define-key menu (vector member)
+                    `(menu-item ,(car entry) ,(cdr entry)))))
+    menu))
+
 (defun init/tab-bar-menu-format ()
-  "Return a clickable tab-bar button per top-level menu, or nil when hidden."
+  "Return four grouped tab-bar menus, or nil when the menu is hidden."
   (when (init/menu-bar-desired-p)
-    (let (items)
+    (let (entries items)
       (map-keymap
        (lambda (key binding)
-         (let ((entry (init/tab-bar--menu-entry binding)))
-           (when entry
-             (let ((label (car entry))
-                   (menu (cdr entry)))
-               (push
-                `(,key menu-item
-                       ,(propertize (concat " " label " ")
-                                    'face 'tab-bar-tab-inactive
-                                    'mouse-face 'highlight)
-                       ,(lambda (event)
-                          (interactive "e")
-                          (popup-menu menu event))
-                       :help ,label)
-                items)))))
+         (when-let ((entry (init/tab-bar--menu-entry binding)))
+           (push (cons key entry) entries)))
        (menu-bar-keymap))
+      (dolist (group init/tab-bar-menu-groups)
+        (pcase-let ((`(,key ,label . ,members) group))
+          (let ((menu (init/tab-bar--group-menu label members entries)))
+            (when (> (length menu) 2)
+              (push
+               `(,key menu-item
+                      ,(propertize (concat " " label " ")
+                                   'face 'tab-bar-tab-inactive
+                                   'mouse-face 'highlight)
+                      ,(lambda (event)
+                         (interactive "e")
+                         (popup-menu menu event))
+                      :help ,label)
+               items)))))
       (nreverse items))))
 
 (defun init/menu-bar-refresh (&rest _)
@@ -383,8 +356,7 @@ under lisp/ from `features' first makes those requires re-load in order."
   (tool-bar-mode -1)
   (menu-bar-mode -1)
   (scroll-bar-mode -1)
-  ;; (load-theme 'some-nice-colors t)
-  (load-theme 'wallust t)
+  (init/theme-load-selected)
   (electric-pair-mode 1)
   ;; Keep point near the window edge instead of recentering when wheel
   ;; scrolling moves it outside the visible portion of the buffer.
@@ -593,6 +565,8 @@ If no compilation buffer exists, start a new compilation."
 (global-set-key (kbd bind/forward-paragraph) 'forward-paragraph)
 (global-set-key (kbd bind/backward-paragraph) 'backward-paragraph)
 (global-set-key (kbd bind/repeat) #'repeat)
+(global-set-key (kbd bind/theme-preview) #'init/theme-preview-and-select)
+(global-set-key (kbd bind/theme-gallery) #'init/theme-gallery)
 
 (provide 'editor)
 ;;; editor.el ends here
