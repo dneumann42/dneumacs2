@@ -109,9 +109,17 @@
 
 ;;;; Treemacs buffer buttons
 
+(declare-function treemacs-current-workspace "treemacs-workspaces")
+(declare-function treemacs-default-buffer-name "treemacs")
 (declare-function treemacs-find-file "treemacs")
+(declare-function treemacs-find-file-node "treemacs-core-utils")
+(declare-function treemacs-filewatch-mode "treemacs")
+(declare-function treemacs-follow-mode "treemacs")
+(declare-function treemacs-fringe-indicator-mode "treemacs")
 (declare-function treemacs-get-local-window "treemacs-scope")
+(declare-function treemacs-git-mode "treemacs")
 (declare-function treemacs-goto-file-node "treemacs-core-utils")
+(declare-function treemacs-hide-gitignored-files-mode "treemacs")
 (declare-function treemacs--find-project-for-path "treemacs-core-utils")
 (declare-function treemacs-pulse-on-success "treemacs-logging")
 (declare-function treemacs-pulse-on-failure "treemacs-logging")

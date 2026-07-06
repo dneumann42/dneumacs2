@@ -4,6 +4,8 @@
   "Markdown editing defaults."
   :group 'text)
 
+(defvar markdown-command)
+
 (defcustom init/markdown-fill-column 96
   "Visual line width for Markdown buffers."
   :type 'integer

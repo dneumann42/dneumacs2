@@ -147,8 +147,6 @@ Intended for use in `before-save-hook'."
 (defun init/ide--default-diagnostics ()
   "Show buffer diagnostics, preferring the flycheck popup UI."
   (cond
-   ((fboundp 'flycheck-posframe-show-posframe)
-    (flycheck-posframe-show-posframe))
    ((fboundp 'flycheck-list-errors) (flycheck-list-errors))
    ((fboundp 'flymake-show-buffer-diagnostics)
     (flymake-show-buffer-diagnostics))

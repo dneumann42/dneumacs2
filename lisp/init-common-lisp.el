@@ -9,6 +9,15 @@
 (require 'cl-lib)
 (require 'seq)
 
+(declare-function sly-describe-symbol "sly")
+(declare-function sly-edit-definition "sly")
+(declare-function sly-eval-buffer "sly")
+(declare-function sly-eval-defun "sly")
+(declare-function sly-goto-first-note "sly")
+(declare-function sly-mrepl "sly-mrepl")
+(declare-function sly-mrepl-return "sly-mrepl")
+(declare-function sly-pop-find-definition-stack "sly")
+
 (use-package sly
   :ensure t
   :defer t
@@ -83,7 +92,7 @@
        (switch-to-buffer buffer)
        buffer))))
 
-(defun my/alatar-wrap-repl-display (orig display-action)
+(defun my/alatar-wrap-repl-display (orig _display-action)
   "Advice for `sly-mrepl' routing display to the Alatar REPL frame.
 ORIG is the wrapped function; DISPLAY-ACTION is ignored in favour of
 `my/alatar-pop-to-repl-frame'."

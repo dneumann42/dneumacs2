@@ -23,7 +23,12 @@
 (declare-function flycheck-error-format-position "flycheck")
 (declare-function flycheck-error-end-line "flycheck")
 (declare-function flycheck-error-level-error-list-face "flycheck")
+(declare-function nim--epc-column "nim-suggest")
+(declare-function nim--epc-file "nim-suggest")
+(declare-function nim--epc-line "nim-suggest")
+(declare-function nimsuggest--call-epc "nim-suggest")
 (declare-function project-root "project")
+(defvar nimsuggest-path)
 
 ;;;; Paths and project detection
 

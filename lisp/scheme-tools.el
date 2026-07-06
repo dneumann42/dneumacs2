@@ -3,6 +3,17 @@
 (require 'seq)
 (require 'cl-lib)
 
+(declare-function geiser-connect "geiser-repl")
+(declare-function geiser-doc-symbol-at-point "geiser-doc")
+(declare-function geiser-edit-symbol-at-point "geiser-edit")
+(declare-function geiser-eval-buffer "geiser-eval")
+(declare-function geiser-eval-definition "geiser-eval")
+(declare-function geiser-mode-switch-to-repl "geiser-mode")
+(declare-function geiser-repl--repl/impl "geiser-repl")
+(declare-function geiser-repl--send "geiser-repl")
+(defvar geiser-mode-map)
+(defvar geiser-scheme-implementation)
+
 ;;;; Paredit
 
 (defun my/paredit-transpose-sexps-backward ()

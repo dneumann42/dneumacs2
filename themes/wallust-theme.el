@@ -13,7 +13,7 @@
       (magenta "#D4BD79") (cyan "#FDE97A")
       (white "#F7EEA1") (orange "#13638D")
       (red-dark "#860F3F") (green-dark "#691693")
-      (yellow-dark "#13638D") (blue-dark "#A02614")
+      (blue-dark "#A02614")
       (magenta-dark "#8B6B0B") (cyan-dark "#BDA20A"))
   (custom-theme-set-faces
    'wallust

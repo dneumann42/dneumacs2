@@ -467,7 +467,7 @@ under lisp/ from `features' first makes those requires re-load in order."
 
 ;;;; Compilation panel
 
-(defun init/display-compilation-in-child-frame (buffer alist)
+(defun init/display-compilation-in-child-frame (buffer _alist)
   "Display BUFFER in a child frame at top-right of the current frame.
 ALIST is the `display-buffer' action alist; it is accepted for
 protocol compatibility but not otherwise used."

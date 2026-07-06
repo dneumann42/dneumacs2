@@ -14,7 +14,6 @@
 ;; with Magit refreshes.
 (use-package diff-hl
   :hook (((prog-mode conf-mode text-mode) . diff-hl-mode)
-         (magit-pre-refresh . diff-hl-magit-pre-refresh)
          (magit-post-refresh . diff-hl-magit-post-refresh)))
 
 ;; Per-project environments from .envrc via direnv.

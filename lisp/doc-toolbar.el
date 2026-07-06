@@ -19,6 +19,11 @@
 ;;; Code:
 
 (require 'toolbar)
+(require 'seq)
+
+(defgroup init/doc-toolbar nil
+  "Global toolbar bar."
+  :group 'convenience)
 
 (declare-function init/project-run "project-commands")
 (declare-function init/project-build "project-commands")
@@ -201,6 +206,7 @@ when Vertico mode is enabled."
 (define-minor-mode init/doc-toolbar-mode
   "Show one global toolbar across the top of the frame.
 Hidden by default; toggle with the ⚒ mode-line button."
+  :group 'init/doc-toolbar
   :global t
   (if init/doc-toolbar-mode
       (init/doc-toolbar--show)

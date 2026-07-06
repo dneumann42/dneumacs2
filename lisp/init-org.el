@@ -3,6 +3,22 @@
 (require 'font-tools)
 (require 'org-sync)
 
+(declare-function calendar-current-date "calendar")
+(declare-function org-at-heading-p "org")
+(declare-function org-datetree-find-date-create "org-datetree")
+(declare-function org-edit-headline "org")
+(declare-function org-end-of-subtree "org")
+(declare-function org-fold-show-entry "org-fold")
+(declare-function org-get-heading "org")
+(declare-function org-get-todo-state "org")
+(declare-function org-read-date "org")
+(declare-function org-todo "org")
+(declare-function org-up-heading-safe "org")
+(declare-function org-update-statistics-cookies "org")
+(defvar org-directory)
+(defvar org-log-done)
+(defvar org-todo-log-states)
+
 ;; Org itself is deferred: the use-package block below autoloads it on
 ;; the first Org buffer, agenda, or capture.  Everything at top level
 ;; here must work without Org loaded.
@@ -104,10 +120,30 @@ has a statistics cookie."
   (add-hook 'post-command-hook
             #'init/org-add-parent-cookie-after-command nil t))
 
-(defun org-summary-todo (n-done n-not-done)
+(defun org-summary-todo (_n-done n-not-done)
   "Switch entry to DONE when all subentries are done, to TODO otherwise."
-  (let (org-log-done org-todo-log-states)
+  (let ((org-log-done nil)
+        (org-todo-log-states nil))
     (org-todo (if (= n-not-done 0) "DONE" "TODO"))))
+
+(defun init/org-goto-journal (&optional arg)
+  "Visit today's entry in the journal datetree, creating it if needed.
+Point is left at the end of that day's entry so you keep a single entry
+per day and just keep writing.  With a prefix ARG, prompt for a
+different date instead of using today."
+  (interactive "P")
+  (require 'org-datetree)
+  (find-file (expand-file-name "journal.org" org-directory))
+  (org-datetree-find-date-create
+   (if arg
+       (let ((time (org-read-date nil t nil "Journal date")))
+         (list (nth 4 (decode-time time))
+               (nth 3 (decode-time time))
+               (nth 5 (decode-time time))))
+     (calendar-current-date)))
+  (when (fboundp 'org-fold-show-entry) (org-fold-show-entry))
+  (org-end-of-subtree)
+  (unless (bolp) (insert "\n")))
 
 (defun init/org-set-heading-faces ()
   "Set the font scale for Org document titles and heading levels."
@@ -182,25 +218,6 @@ has a statistics cookie."
   (add-hook 'org-after-todo-statistics-hook #'org-summary-todo))
 
 ;;;; Agenda menu
-
-(defun init/org-goto-journal (&optional arg)
-  "Visit today's entry in the journal datetree, creating it if needed.
-Point is left at the end of that day's entry so you keep a single entry
-per day and just keep writing.  With a prefix ARG, prompt for a
-different date instead of using today."
-  (interactive "P")
-  (require 'org-datetree)
-  (find-file (expand-file-name "journal.org" org-directory))
-  (org-datetree-find-date-create
-   (if arg
-       (let ((time (org-read-date nil t nil "Journal date")))
-         (list (nth 4 (decode-time time))
-               (nth 3 (decode-time time))
-               (nth 5 (decode-time time))))
-     (calendar-current-date)))
-  (when (fboundp 'org-fold-show-entry) (org-fold-show-entry))
-  (org-end-of-subtree)
-  (unless (bolp) (insert "\n")))
 
 (defun init/org-capture-todo ()
   "Capture a new TODO into the inbox."
