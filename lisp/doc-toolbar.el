@@ -20,6 +20,7 @@
 
 (require 'toolbar)
 (require 'seq)
+(require 'init-persist)
 
 (defgroup init/doc-toolbar nil
   "Global toolbar bar."
@@ -210,6 +211,31 @@ Hidden by default; toggle with the ⚒ mode-line button."
   (if init/doc-toolbar-mode
       (init/doc-toolbar--show)
     (init/doc-toolbar--hide)))
+
+;;;; Persist the toolbar's shown/hidden state across sessions
+
+(defvar init/doc-toolbar-persisted nil
+  "Persisted desired state of `init/doc-toolbar-mode' (t when shown).")
+;; Restored early by `init/persist-load' (see init.el); registered here so
+;; it is written back to the unified store whenever it changes.
+(init/persist-register 'init/doc-toolbar-persisted)
+
+(defun init/doc-toolbar--save ()
+  "Persist whether the toolbar is currently shown."
+  (setq init/doc-toolbar-persisted (and init/doc-toolbar-mode t))
+  (init/persist-save-variable 'init/doc-toolbar-persisted))
+
+;; Record every toggle (the mode hook runs after the mode variable flips,
+;; on both enable and disable).
+(add-hook 'init/doc-toolbar-mode-hook #'init/doc-toolbar--save)
+
+(defun init/doc-toolbar--restore ()
+  "Re-enable the toolbar at startup if it was shown last session."
+  (when (and init/doc-toolbar-persisted (not init/doc-toolbar-mode))
+    (init/doc-toolbar-mode 1)))
+
+;; Defer until the frame is ready; showing needs a live graphical frame.
+(add-hook 'emacs-startup-hook #'init/doc-toolbar--restore)
 
 ;; Session restores rebuild the window tree; re-show the bar when the
 ;; mode is on so it survives session switches.

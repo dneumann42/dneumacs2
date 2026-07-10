@@ -59,4 +59,10 @@ places
 
 # Recentf history
 recentf
+
+# Persisted variable state (init-persist.el); legacy per-feature files
+# migrate into persisted-vars.el and are then removed automatically.
+persisted-vars.el
 theme-state.el
+menu-bar-state.el
+toolbar-state.el

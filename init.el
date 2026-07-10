@@ -4,6 +4,11 @@
 
 (setq inhibit-startup-screen t)
 
+;; Restore persisted variable state (theme, menu-bar/toolbar toggles, ...)
+;; before any module reads those values during startup.
+(require 'init-persist)
+(init/persist-load)
+
 (require 'keybindings)
 (require 'toolbar)
 (require 'package)

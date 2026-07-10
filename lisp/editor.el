@@ -4,6 +4,7 @@
 (require 'subr-x)
 (require 'font-tools)
 (require 'pulldown-menu)
+(require 'init-persist)
 
 ;;;; State variables
 
@@ -139,6 +140,9 @@
   "Manual override for the menu bar.
 `on' forces it visible everywhere, `off' forces it hidden, and nil
 defers to `init/menu-bar-auto-modes'.")
+;; Restored early by `init/persist-load' (see init.el); registered here so
+;; it is written back to the unified store whenever it changes.
+(init/persist-register 'init/menu-bar-override)
 
 (defun init/menu-bar-relevant-buffer ()
   "Return the buffer whose mode should decide menu-bar visibility.
@@ -222,7 +226,16 @@ existing mode-sensitive menu-bar menus that become submenus.")
                          (pulldown-menu-popup menu event))
                       :help ,label)
                items)))))
-      (nreverse items))))
+      ;; Append a stretch that fills to the right edge with the `tab-bar'
+      ;; face, so the bar and its bottom border span the whole frame width
+      ;; instead of stopping after the last button.
+      (when items
+        (append (nreverse items)
+                (list `(init/tab-bar-filler menu-item
+                        ,(propertize " "
+                                     'display '(space :align-to right)
+                                     'face 'tab-bar)
+                        ignore)))))))
 
 (defun init/menu-bar--combined-keymap ()
   "Return one keymap holding every tab-bar menu group as a submenu.
@@ -264,6 +277,7 @@ Adjusts `tab-bar-lines' (safe with a side window open) rather than toggling
   (interactive)
   (setq init/menu-bar-override
         (if (init/menu-bar-desired-p) 'off 'on))
+  (init/persist-save-variable 'init/menu-bar-override)
   (init/menu-bar-refresh)
   (message "Menu bar %s"
            (if (eq init/menu-bar-override 'on) "shown" "hidden")))
@@ -582,15 +596,33 @@ If no compilation buffer exists, start a new compilation."
 ;; often leave unstyled, so the menu bar shows up white on a dark frame.
 ;; Follow the theme's `default' colors instead, and reapply on every theme
 ;; switch (`enable-theme-functions' runs after a theme is enabled).
+(defun init/tab-bar--border-color ()
+  "Return a themed color for the menu bar's bottom border."
+  (seq-some (lambda (spec)
+              (let ((c (apply #'face-attribute spec)))
+                (and (stringp c) c)))
+            '((window-divider :foreground nil t)
+              (vertical-border :foreground nil t)
+              (mode-line :background nil t)
+              (shadow :foreground nil t)
+              (default :foreground nil t))))
+
 (defun init/harmonize-tab-bar-faces (&rest _)
-  "Match the tab-bar faces to the current theme's default colors."
+  "Match the tab-bar faces to the current theme, with a bottom border.
+The border is an `:underline' set on both the bar fill (`tab-bar') and
+the buttons (`tab-bar-tab-inactive') so it runs continuously across the
+whole width -- a `:box' would draw around each segment separately."
   (let ((bg (face-attribute 'default :background nil t))
-        (fg (face-attribute 'default :foreground nil t)))
+        (fg (face-attribute 'default :foreground nil t))
+        (border (init/tab-bar--border-color)))
     (when (stringp bg)
-      (set-face-attribute 'tab-bar nil :inherit 'default
-                          :background bg :foreground fg :box nil)
-      (set-face-attribute 'tab-bar-tab-inactive nil :inherit 'default
-                          :background bg :foreground fg :box nil))))
+      (let ((underline (and (stringp border) (list :color border))))
+        (set-face-attribute 'tab-bar nil :inherit 'default
+                            :background bg :foreground fg :box nil
+                            :overline nil :underline underline)
+        (set-face-attribute 'tab-bar-tab-inactive nil :inherit 'default
+                            :background bg :foreground fg :box nil
+                            :overline nil :underline underline)))))
 
 (if (boundp 'enable-theme-functions)
     (add-hook 'enable-theme-functions #'init/harmonize-tab-bar-faces)
