@@ -64,6 +64,16 @@
     (setq treemacs-collapse-dirs
           (if (bound-and-true-p treemacs-python-executable) 3 0))
 
+    ;; Never descend into GVFS's virtual metadata/mount trees.  Their
+    ;; `readdir'/`stat' calls can block for minutes, and with
+    ;; `treemacs-collapse-dirs' walking several levels deep this once
+    ;; froze startup for good when a project root sat above
+    ;; ~/.local/share/gvfs-metadata.  Ignoring them keeps expansion,
+    ;; collapse-dirs and filewatch from ever touching that path.
+    (add-to-list 'treemacs-ignored-file-predicates
+                 (lambda (file _absolute-path)
+                   (member file '("gvfs-metadata" ".gvfs"))))
+
     ;; The default width and height of the icons is 22 pixels. If you are
     ;; using a Hi-DPI display, uncomment this to double the icon size.
     ;;(treemacs-resize-icons 44)
