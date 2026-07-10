@@ -30,6 +30,9 @@ url/
 # Transient (popup) history
 transient/
 
+# Emacs bookmarks (auto-generated local state)
+bookmarks
+
 # Projectile
 projectile-bookmarks.eld
 projectile-frecency.eld

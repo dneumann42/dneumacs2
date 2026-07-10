@@ -133,8 +133,7 @@ when Vertico mode is enabled."
            " "
            ;; One pixel of headroom, matching the toolbar fill: a line
            ;; ending exactly at the window edge draws a truncation glyph.
-           'display `(space :align-to (- right-fringe (,(1+ projects-width))))
-           'face '((:height 1.0) init/toolbar-border))))
+           'display `(space :align-to (- right-fringe (,(1+ projects-width)))))))
     (concat utilities spacer projects)))
 
 (defun init/doc-toolbar--window ()
