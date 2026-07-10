@@ -65,6 +65,21 @@ Uses the shared font installation flow and returns nil when unavailable."
    :installer #'init/org-install-writer-font
    :require-graphic t))
 
+(defcustom init/org-fill-column 80
+  "Visual line width for Org buffers."
+  :type 'integer
+  :group 'org)
+
+(defun init/org-line-wrap-setup ()
+  "Soft-wrap Org prose at `init/org-fill-column' columns.
+`visual-line-mode' wraps on word boundaries without inserting hard
+newlines; `visual-fill-column-mode' pins the wrap point (and the text
+column) to `fill-column' instead of the window edge."
+  (setq-local fill-column init/org-fill-column)
+  (visual-line-mode 1)
+  (when (fboundp 'visual-fill-column-mode)
+    (visual-fill-column-mode 1)))
+
 (defvar-local init/org--writer-font-remap nil
   "Face-remap cookie for the writer font in the current Org buffer.")
 
@@ -163,7 +178,8 @@ different date instead of using today."
 (use-package org
   :ensure nil
   :hook ((org-mode . init/org-enable-parent-cookie-tracking)
-         (org-mode . init/org-writer-font-setup))
+         (org-mode . init/org-writer-font-setup)
+         (org-mode . init/org-line-wrap-setup))
   :bind (("C-c a" . org-agenda)
          ("C-c c" . org-capture)
          ("C-c j" . init/org-goto-journal)

@@ -32,6 +32,7 @@ transient/
 
 # Projectile
 projectile-bookmarks.eld
+projectile-frecency.eld
 projects
 
 # Geiser REPL history
@@ -55,3 +56,4 @@ places
 
 # Recentf history
 recentf
+theme-state.el

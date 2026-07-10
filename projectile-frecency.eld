@@ -1,1 +1,1 @@
-(("/home/dneumann/.emacs.d/" (".cache/treemacs-persist" 1 1783694095) ("custom.el" 1 1783693769)))
+(("/home/dneumann/.org/" ("journal.org" 4 1783703323)) ("/home/dneumann/.emacs.d/" ("bookmarks" 1 1783704632) ("custom.el" 4 1783704585) (".cache/treemacs-persist" 1 1783694095)))

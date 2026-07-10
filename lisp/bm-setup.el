@@ -59,7 +59,21 @@
   :config
   ;; Persist bookmarks in every buffer without asking.
   (setq-default bm-buffer-persistence t)
+  (advice-add 'bm-repository-save :around #'init/bm-save-without-pp)
   (add-hook 'kill-emacs-hook #'init/bm-save-everything))
+
+;; `bm-repository-save' writes the repository with `prin1' and then
+;; runs `pp-buffer' to pretty-print it.  `pp-buffer' reindents the
+;; whole s-expression form-by-form and is pathologically slow once a
+;; few files' worth of bookmarks (each carrying context strings)
+;; accumulate -- it dominates shutdown time.  The file is read back
+;; with plain `read', so the formatting is cosmetic only; disabling
+;; `pp-buffer' during the save leaves the data identical but turns the
+;; write into a single fast `prin1'.
+(defun init/bm-save-without-pp (orig &rest args)
+  "Call ORIG (`bm-repository-save') with `pp-buffer' neutralised."
+  (cl-letf (((symbol-function 'pp-buffer) #'ignore))
+    (apply orig args)))
 
 (defun init/bm-save-everything ()
   "Save all buffers' bookmarks and write the repository to disk."

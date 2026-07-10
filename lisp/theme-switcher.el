@@ -60,18 +60,6 @@
       (when (file-exists-p temporary)
         (delete-file temporary)))))
 
-(defun init/theme-select (theme)
-  "Load THEME exclusively and make it the choice for future sessions."
-  (interactive
-   (list (intern (completing-read "Use theme: "
-                                  (mapcar #'symbol-name
-                                          (custom-available-themes))
-                                  nil t))))
-  (init/theme--apply theme)
-  (setq init/selected-theme theme)
-  (init/theme--save theme)
-  (message "Theme %s selected and saved" theme))
-
 (defun init/theme--load-theme-around (original theme &optional no-confirm no-enable)
   "Make an ordinary `load-theme' call exclusive and persistent.
 ORIGINAL, THEME, NO-CONFIRM, and NO-ENABLE mirror `load-theme'.  Internal
@@ -208,9 +196,12 @@ This supports both built-in completion and Vertico's highlighted row."
            (minibuffer-contents-no-properties))))
     (and (stringp candidate) (member candidate names) candidate)))
 
-(defun init/theme-preview-and-select ()
-  "Preview installed themes while completing, then persist the chosen one."
-  (interactive)
+(defun init/theme--read-with-live-preview ()
+  "Read a theme name with a live preview.
+Pops up the theme specimen buffer and, as the highlighted candidate
+moves through the completion list, applies that theme so the whole
+frame previews it before selection.  Restores the previously enabled
+themes when the read is cancelled.  Returns the chosen theme symbol."
   (init/theme-preview-buffer)
   (let* ((original (copy-sequence custom-enabled-themes))
          (names (sort (mapcar #'symbol-name (custom-available-themes))
@@ -227,7 +218,22 @@ This supports both built-in completion and Vertico's highlighted row."
           (setq choice (completing-read
                         "Preview theme (RET selects, C-g cancels): " names nil t)))
       (unless choice (init/theme--restore original)))
-    (init/theme-select (intern choice))))
+    (intern choice)))
+
+(defun init/theme-select (theme)
+  "Load THEME exclusively and make it the choice for future sessions.
+Called interactively, show the theme specimen buffer and live-apply
+each candidate to the whole frame as you move through the list, so you
+see the theme before committing to it; press RET to keep the
+highlighted one or C-g to cancel and restore the previous theme."
+  (interactive (list (init/theme--read-with-live-preview)))
+  (init/theme--apply theme)
+  (setq init/selected-theme theme)
+  (init/theme--save theme)
+  (message "Theme %s selected and saved" theme))
+
+;; Historical name; `init/theme-select' now does the live preview itself.
+(defalias 'init/theme-preview-and-select 'init/theme-select)
 
 (defun init/theme--gallery-entries ()
   "Fetch (DISPLAY-NAME . SLUG) entries from EmacsThemes."
