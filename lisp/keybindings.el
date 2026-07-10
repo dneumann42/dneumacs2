@@ -16,6 +16,8 @@
   "Key sequence for opening a cheatsheet (guide).")
 (defconst bind/compilation-toggle "C-c b"
   "Key sequence for toggling the compilation buffer.")
+(defconst bind/compilation-toggle-fkey "<f12>"
+  "Alternate key sequence for toggling the run/build panel.")
 (defconst bind/project-panel "C-c P"
   "Key sequence for toggling the project panel.")
 (defconst bind/doc-toolbar "C-c T"

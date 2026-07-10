@@ -518,75 +518,207 @@ under lisp/ from `features' first makes those requires re-load in order."
   (set-face-foreground 'highlight-indent-guides-top-character-face "#5d6aa8")
   (set-face-foreground 'highlight-indent-guides-stack-character-face "#8a6a9f"))
 
-;;;; Compilation panel
+;;;; Run/build panel
+
+;; The *compilation* buffer -- plain `compile', nim run, and the
+;; per-project run/build commands -- is shown in a dedicated panel that
+;; can take one of two shapes, switchable at any time with
+;; `init/compilation-toggle-floating' (or the panel toolbar's ⧉ button):
+;;
+;;   floating  a child frame at the top-right of the editing frame
+;;   embedded  a bottom window split into the editing frame
+;;
+;; Output follows the tail as it arrives, but leaves point alone once you
+;; scroll up -- both compilation-mode and comint set
+;; `window-point-insertion-type', so a window sitting at the end tracks new
+;; output while a scrolled-up window stays put; `compilation-scroll-output'
+;; starts plain compilations at the bottom.  The panel is resizable from
+;; the toolbar (⤢ / ⤡), and a floating panel can also be resized by
+;; dragging its border.
+
+(defconst init/compilation-buffer-name "*compilation*"
+  "Name of the run/build panel buffer.")
+
+(defcustom init/compilation-floating t
+  "Non-nil shows the run/build panel as a floating child frame.
+When nil, the panel is embedded as a bottom window in the editing frame.
+Toggle at runtime with `init/compilation-toggle-floating'."
+  :type 'boolean
+  :group 'convenience)
+
+(defvar init/compilation-frame-width 80
+  "Width, in columns, of the floating run/build panel.")
+(defvar init/compilation-frame-height 20
+  "Height, in lines, of the floating run/build panel.")
+(defvar init/compilation-window-height 15
+  "Height, in lines, of the embedded run/build panel window.")
+
+;; Follow output to the bottom as it appears (see the section comment).
+(setq compilation-scroll-output t)
+
+;;;;; Display
 
 (defun init/display-compilation-in-child-frame (buffer _alist)
-  "Display BUFFER in a child frame at top-right of the current frame.
-ALIST is the `display-buffer' action alist; it is accepted for
-protocol compatibility but not otherwise used."
+  "Display BUFFER in a resizable child frame at the frame's top-right.
+_ALIST is accepted for `display-buffer' protocol compatibility."
   (condition-case err
       (progn
-        (when (and init/compilation-frame (frame-live-p init/compilation-frame))
+        (when (frame-live-p init/compilation-frame)
           (delete-frame init/compilation-frame))
         (let* ((parent (selected-frame))
-               (char-width (frame-char-width parent))
-               (child-width (* 80 char-width))
-               (parent-width (frame-pixel-width parent))
-               (left-pos (- parent-width child-width 20))
+               (child-width (* init/compilation-frame-width
+                               (frame-char-width parent)))
+               (left-pos (max 0 (- (frame-pixel-width parent) child-width 20)))
                (frame (make-frame
                        `((parent-frame . ,parent)
-                         (width . 80)
-                         (height . 20)
+                         (width . ,init/compilation-frame-width)
+                         (height . ,init/compilation-frame-height)
                          (top . 10)
                          (left . ,left-pos)
-                         (undecorated . t))))
-               (window (frame-root-window frame)))
+                         (undecorated . t)
+                         (internal-border-width . 6)
+                         (drag-internal-border . t)))))
           (setq init/compilation-frame frame)
-          (set-window-buffer window buffer)
+          (set-window-buffer (frame-root-window frame) buffer)
           (raise-frame frame)
-          (message "compile panel: frame pos=%s size=%dx%d visible=%s"
-                   (frame-position frame)
-                   (frame-pixel-width frame)
-                   (frame-pixel-height frame)
-                   (frame-visible-p frame))
-          window))
+          (frame-root-window frame)))
     (error
-     (message "compile panel: error: %s" (error-message-string err))
+     (message "Run panel: %s" (error-message-string err))
      nil)))
 
+(defun init/display-compilation-in-side-window (buffer alist)
+  "Display BUFFER as a bottom window spanning the editing frame."
+  (display-buffer-in-side-window
+   buffer
+   (append alist
+           `((side . bottom)
+             (slot . 0)
+             (window-height . ,init/compilation-window-height)
+             (window-parameters . ((no-delete-other-windows . t)))))))
+
+(defun init/compilation--display (buffer alist)
+  "Route the run/build BUFFER to the floating or embedded panel."
+  (if init/compilation-floating
+      (init/display-compilation-in-child-frame buffer alist)
+    (init/display-compilation-in-side-window buffer alist)))
+
 (add-to-list 'display-buffer-alist
-             '("\\*compilation\\*"
-               (init/display-compilation-in-child-frame)))
+             `(,(regexp-quote init/compilation-buffer-name)
+               (init/compilation--display)))
 
-(defun init/compilation--restore-focus (&rest _)
-  "Return input focus to the parent frame after starting a compilation."
-  (when (and init/compilation-frame (frame-live-p init/compilation-frame))
-    (let ((parent (frame-parent init/compilation-frame)))
-      (when (and parent (frame-live-p parent))
-        (select-frame-set-input-focus parent)))))
+;;;;; Panel state
 
-(advice-add 'compile :after #'init/compilation--restore-focus)
+(defun init/compilation--buffer ()
+  "Return the live run/build panel buffer, or nil."
+  (get-buffer init/compilation-buffer-name))
+
+(defun init/compilation--side-window ()
+  "Return the embedded panel window, or nil."
+  (when-let ((buffer (init/compilation--buffer)))
+    (seq-find (lambda (window) (window-parameter window 'window-side))
+              (get-buffer-window-list buffer nil t))))
+
+(defun init/compilation--visible-p ()
+  "Return non-nil when the run/build panel is on screen."
+  (or (frame-live-p init/compilation-frame)
+      (window-live-p (init/compilation--side-window))))
+
+(defun init/compilation--show ()
+  "Show the run/build panel for its existing buffer."
+  (when-let ((buffer (init/compilation--buffer)))
+    (display-buffer buffer)))
+
+;;;;; Commands
 
 (defun init/compilation-dismiss ()
-  "Dismiss the compilation child frame."
+  "Hide the run/build panel, whether floating or embedded."
   (interactive)
-  (when (and init/compilation-frame (frame-live-p init/compilation-frame))
+  (when (frame-live-p init/compilation-frame)
     (delete-frame init/compilation-frame)
-    (setq init/compilation-frame nil)))
+    (setq init/compilation-frame nil))
+  (when-let ((window (init/compilation--side-window)))
+    (when (window-live-p window)
+      (delete-window window))))
+
+(defun init/compilation-focus ()
+  "Give input focus to the run/build panel, if it is visible.
+Selects the panel window -- the child frame's root window when floating,
+the bottom window when embedded -- and moves point to the end so comint
+input and the latest output are in view."
+  (interactive)
+  (let ((window (cond
+                 ((frame-live-p init/compilation-frame)
+                  (select-frame-set-input-focus init/compilation-frame)
+                  (frame-root-window init/compilation-frame))
+                 (t (init/compilation--side-window)))))
+    (when (window-live-p window)
+      (select-window window)
+      (goto-char (point-max)))))
+
+(defun init/compilation--focus-after (&rest _)
+  "Advice: reveal and focus the run/build panel after a compilation starts.
+Attached to `compile', so f5 and the language run commands focus the
+panel; `init/project-commands--execute' calls `init/compilation-focus'
+directly for the run/build (f2 / f3) comint flow."
+  (init/compilation-focus))
+
+(advice-add 'compile :after #'init/compilation--focus-after)
 
 (defun init/compilation-toggle ()
-  "Toggle the compilation child frame on and off.
-If no compilation buffer exists, start a new compilation."
+  "Toggle the run/build panel on and off, focusing it when shown.
+If no compilation buffer exists yet, start a new compilation."
   (interactive)
-  (if (and init/compilation-frame (frame-live-p init/compilation-frame))
+  (if (init/compilation--visible-p)
       (init/compilation-dismiss)
-    (let ((buf (get-buffer "*compilation*")))
-      (if (buffer-live-p buf)
-          (init/display-compilation-in-child-frame buf nil)
-        (call-interactively #'compile)))))
+    (if (init/compilation--buffer)
+        (progn
+          (init/compilation--show)
+          (init/compilation-focus))
+      (call-interactively #'compile))))
+
+(defun init/compilation-toggle-floating ()
+  "Switch the run/build panel between a floating frame and an embedded split.
+Keeps the panel (and any running process) visible across the switch."
+  (interactive)
+  (let ((was-visible (init/compilation--visible-p)))
+    (init/compilation-dismiss)
+    (setq init/compilation-floating (not init/compilation-floating))
+    (when (and was-visible (init/compilation--buffer))
+      (init/compilation--show))
+    (message "Run panel: %s"
+             (if init/compilation-floating "floating" "embedded"))))
+
+(defun init/compilation--resize (delta)
+  "Grow (DELTA > 0) or shrink the run/build panel by DELTA lines."
+  (if init/compilation-floating
+      (if (frame-live-p init/compilation-frame)
+          (progn
+            (setq init/compilation-frame-height
+                  (max 6 (+ init/compilation-frame-height delta)))
+            (set-frame-height init/compilation-frame
+                              init/compilation-frame-height))
+        (user-error "No floating run panel is open"))
+    (let ((window (init/compilation--side-window)))
+      (if (window-live-p window)
+          (condition-case err
+              (progn
+                (window-resize window delta nil)
+                (setq init/compilation-window-height (window-height window)))
+            (error (user-error "%s" (error-message-string err))))
+        (user-error "No embedded run panel is open")))))
+
+(defun init/compilation-enlarge ()
+  "Make the run/build panel taller."
+  (interactive)
+  (init/compilation--resize 4))
+
+(defun init/compilation-shrink ()
+  "Make the run/build panel shorter."
+  (interactive)
+  (init/compilation--resize -4))
 
 (defun init/compilation-mode-hook ()
-  "Bind q to dismiss the compilation child frame."
+  "Bind q to dismiss the run/build panel."
   (define-key compilation-mode-map (kbd "q") #'init/compilation-dismiss))
 
 (add-hook 'compilation-mode-hook #'init/compilation-mode-hook)
@@ -651,6 +783,7 @@ whole width -- a `:box' would draw around each segment separately."
 (global-set-key (kbd bind/toggle-frame-transparency) #'init/toggle-frame-transparency)
 (global-set-key (kbd bind/reload-config) #'init/reload-config)
 (global-set-key (kbd bind/compilation-toggle) #'init/compilation-toggle)
+(global-set-key (kbd bind/compilation-toggle-fkey) #'init/compilation-toggle)
 (global-set-key (kbd bind/compile) #'compile)
 (global-set-key (kbd bind/forward-paragraph) 'forward-paragraph)
 (global-set-key (kbd bind/backward-paragraph) 'backward-paragraph)

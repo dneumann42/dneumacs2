@@ -16,10 +16,12 @@
 ;; walks you through picking one.
 ;;
 ;; Execution goes through the standard compile flow: output lands in
-;; the floating *compilation* child frame, but started in comint mode
-;; so interactive command-line programs accept keyboard input.  The
-;; panel carries its own toolbar: run/build/switch, rerun, kill,
-;; clear, error navigation, focus-for-input and dismiss.
+;; the run/build panel (a floating child frame or an embedded bottom
+;; split; see editor.el), started in comint mode so interactive
+;; command-line programs accept keyboard input.  The panel carries its
+;; own toolbar: run/build/switch, rerun, kill, clear, error navigation,
+;; resize (taller/shorter), float/embed toggle, focus-for-input and
+;; dismiss.
 
 ;;; Code:
 
@@ -29,7 +31,10 @@
 
 (declare-function init/project-root "project-tools")
 (declare-function init/compilation-dismiss "editor")
-(declare-function init/compilation--restore-focus "editor")
+(declare-function init/compilation-focus "editor")
+(declare-function init/compilation-enlarge "editor")
+(declare-function init/compilation-shrink "editor")
+(declare-function init/compilation-toggle-floating "editor")
 (declare-function comint-clear-buffer "comint")
 (declare-function compilation-start "compile")
 (defvar compilation-arguments)
@@ -132,9 +137,9 @@ that is not in the list registers it too.  Returns the chosen command."
     ;; MODE t = comint buffer with compilation-shell-minor-mode, so
     ;; interactive programs accept input; errors stay clickable.
     (compilation-start command t))
-  ;; Keep focus in the editing frame, like the plain compile flow.
-  (when (fboundp 'init/compilation--restore-focus)
-    (init/compilation--restore-focus)))
+  ;; Reveal and focus the panel so keyboard input reaches the program.
+  (when (fboundp 'init/compilation-focus)
+    (init/compilation-focus)))
 
 (defun init/project-run ()
   "Execute the project's run command in the floating panel."
@@ -201,6 +206,10 @@ only works while the process is alive; otherwise erase directly."
    :sep
    '("↓" "Next error" compilation-next-error)
    '("↑" "Previous error" compilation-previous-error)
+   :sep
+   '("⤢" "Make the panel taller" init/compilation-enlarge)
+   '("⤡" "Make the panel shorter" init/compilation-shrink)
+   '("⧉" "Toggle floating / embedded panel" init/compilation-toggle-floating)
    :sep
    '("⌨" "Focus the panel to type program input" init/project-commands-focus-panel)
    '("⮌" "Back to the editor" init/project-commands-unfocus-panel)
