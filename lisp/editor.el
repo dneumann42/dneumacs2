@@ -3,6 +3,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'font-tools)
+(require 'pulldown-menu)
 
 ;;;; State variables
 
@@ -218,10 +219,34 @@ existing mode-sensitive menu-bar menus that become submenus.")
                                    'mouse-face 'highlight)
                       ,(lambda (event)
                          (interactive "e")
-                         (popup-menu menu event))
+                         (pulldown-menu-popup menu event))
                       :help ,label)
                items)))))
       (nreverse items))))
+
+(defun init/menu-bar--combined-keymap ()
+  "Return one keymap holding every tab-bar menu group as a submenu.
+Lets the menu bar be opened and navigated entirely from the keyboard."
+  (let (entries (top (make-sparse-keymap "Menu")))
+    (map-keymap
+     (lambda (key binding)
+       (when-let ((entry (init/tab-bar--menu-entry binding)))
+         (push (cons key entry) entries)))
+     (menu-bar-keymap))
+    ;; `define-key' prepends, so add groups in reverse to keep File..Guides.
+    (dolist (group (reverse init/tab-bar-menu-groups))
+      (pcase-let ((`(,key ,label . ,members) group))
+        (let ((menu (init/tab-bar--group-menu label members entries)))
+          (when (> (length menu) 2)
+            (define-key top (vector key) `(menu-item ,label ,menu))))))
+    top))
+
+(defun init/menu-bar-open ()
+  "Open the menu-bar menus as a keyboard-navigable themed pulldown.
+Every group (File, Edit, ...) appears as a submenu, so all menu-bar
+menus are reachable with the arrow keys from a single keypress."
+  (interactive)
+  (pulldown-menu-popup (init/menu-bar--combined-keymap)))
 
 (defun init/menu-bar-refresh (&rest _)
   "Show or hide the tab-bar menu by setting its height on visibility changes.
@@ -385,6 +410,14 @@ under lisp/ from `features' first makes those requires re-load in order."
   (global-so-long-mode 1)
   (repeat-mode 1)
   (context-menu-mode 1)
+  ;; Draw right-click (and keyboard) context menus with the themed
+  ;; buffer-based pulldown instead of the native toolkit popup.  The mode
+  ;; map binds `down-mouse-3' to a `menu-item' whose :filter Emacs renders
+  ;; natively; replacing it with a command reroutes it through the pulldown.
+  (define-key context-menu-mode-map [down-mouse-3] #'pulldown-menu-context-menu)
+  (when (featurep 'ns)
+    (define-key context-menu-mode-map [C-down-mouse-1] #'pulldown-menu-context-menu))
+  (advice-add 'context-menu-open :override #'pulldown-menu-context-menu-open)
   (save-place-mode 1)
   (add-hook 'prog-mode-hook #'display-line-numbers-mode)
   (add-hook 'prog-mode-hook #'hl-line-mode)
@@ -545,6 +578,25 @@ If no compilation buffer exists, start a new compilation."
       tab-bar-show t
       tab-bar-auto-width nil)
 
+;; The built-in `tab-bar' face carries a light background that dark themes
+;; often leave unstyled, so the menu bar shows up white on a dark frame.
+;; Follow the theme's `default' colors instead, and reapply on every theme
+;; switch (`enable-theme-functions' runs after a theme is enabled).
+(defun init/harmonize-tab-bar-faces (&rest _)
+  "Match the tab-bar faces to the current theme's default colors."
+  (let ((bg (face-attribute 'default :background nil t))
+        (fg (face-attribute 'default :foreground nil t)))
+    (when (stringp bg)
+      (set-face-attribute 'tab-bar nil :inherit 'default
+                          :background bg :foreground fg :box nil)
+      (set-face-attribute 'tab-bar-tab-inactive nil :inherit 'default
+                          :background bg :foreground fg :box nil))))
+
+(if (boundp 'enable-theme-functions)
+    (add-hook 'enable-theme-functions #'init/harmonize-tab-bar-faces)
+  (advice-add 'load-theme :after #'init/harmonize-tab-bar-faces))
+(init/harmonize-tab-bar-faces)
+
 ;; Enable the tab bar once, before any side window exists; never toggle it.
 (tab-bar-mode 1)
 
@@ -567,6 +619,13 @@ If no compilation buffer exists, start a new compilation."
 (global-set-key (kbd bind/repeat) #'repeat)
 (global-set-key (kbd bind/theme-preview) #'init/theme-preview-and-select)
 (global-set-key (kbd bind/theme-gallery) #'init/theme-gallery)
+
+;; Keyboard entry points for the pulldown menus:
+;;   <f10>   open the menu-bar menus (File, Edit, ...) as one pulldown
+;;   S-<f10> open the right-click context menu at point (context-menu-open
+;;           is advised to render through the themed pulldown)
+(global-set-key (kbd "<f10>") #'init/menu-bar-open)
+(global-set-key (kbd "<S-f10>") #'context-menu-open)
 
 (provide 'editor)
 ;;; editor.el ends here

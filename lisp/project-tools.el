@@ -1,11 +1,20 @@
 ;;; project-tools.el --- Project tooling -*- lexical-binding: t; -*-
 
+;; Projectile is the one project system.  Its command map is reachable
+;; from every project prefix -- the built-in `C-x p', the classic
+;; `C-c p', and `s-p' -- so they behave identically: `C-x p p',
+;; `C-c p p' and `s-p p' all run `projectile-switch-project' through the
+;; same session-aware `projectile-switch-project-action' (set in
+;; sessions.el).  This replaces the built-in project.el bindings on
+;; `C-x p'; project.el's functions still back `init/project-root'.
 (use-package projectile
   :ensure t
+  :demand t
+  :bind-keymap (("C-x p" . projectile-command-map)
+                ("C-c p" . projectile-command-map)
+                ("s-p"   . projectile-command-map))
   :config
-  (projectile-mode +1)
-  (define-key projectile-mode-map (kbd "s-p") 'projectile-command-map)
-  (define-key projectile-mode-map (kbd "C-c p") 'projectile-command-map))
+  (projectile-mode +1))
 
 (use-package magit
   :bind (("C-x g" . magit-status)))

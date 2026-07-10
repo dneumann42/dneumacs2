@@ -15,6 +15,11 @@
 ;; Projectile (registering the project if Projectile does not know it),
 ;; fetch, and remove.  Clones and fetches run asynchronously.
 ;;
+;; Every cloned repo is kept registered in Projectile's known projects:
+;; the panel syncs the clone set into Projectile on each change (clone,
+;; remove, fetch, refresh), adding new clones and dropping ones that are
+;; gone.  Projectile projects outside the clone directory are untouched.
+;;
 ;; Toggle the panel with the ▦ mode-line button or `bind/project-panel'.
 ;; Inside the panel: a add, c clone, RET/o open, u fetch, d remove,
 ;; g refresh, TAB between buttons, q close.
@@ -25,7 +30,9 @@
 (require 'subr-x)
 
 (declare-function projectile-add-known-project "projectile")
+(declare-function projectile-remove-known-project "projectile")
 (declare-function projectile-switch-project-by-name "projectile")
+(defvar projectile-known-projects)
 
 ;;;; Customization
 
@@ -123,6 +130,42 @@ Understands scp-style (git@host:user/repo.git) and URL-style
   "Return the directory URL is (or would be) cloned into."
   (expand-file-name (init/project-panel--repo-name url)
                     init/project-panel-directory))
+
+;;;; Projectile sync
+
+(defun init/project-panel--known-root (path)
+  "Return PATH in Projectile's canonical known-project spelling."
+  (file-name-as-directory (abbreviate-file-name (expand-file-name path))))
+
+(defun init/project-panel--sync-projectile ()
+  "Keep Projectile's known projects in step with the panel's clones.
+Registers every registered repo that is actually cloned under
+`init/project-panel-directory', and drops panel-managed projects that
+are no longer cloned or registered.  Projectile projects outside the
+clone directory are never touched.  Runs on every panel change (via
+`init/project-panel--render') but only writes when the set differs, so
+it is cheap to call repeatedly."
+  (when (require 'projectile nil t)
+    (let* ((dir (init/project-panel--known-root init/project-panel-directory))
+           ;; Repos that exist on disk, in Projectile's canonical form.
+           (desired
+            (delete-dups
+             (delq nil
+                   (mapcar
+                    (lambda (url)
+                      (let ((path (init/project-panel--repo-path url)))
+                        (when (file-directory-p (expand-file-name ".git" path))
+                          (init/project-panel--known-root path))))
+                    (init/project-panel--read-repos)))))
+           ;; What Projectile currently knows under our clone directory.
+           (managed (seq-filter (lambda (p) (string-prefix-p dir p))
+                                projectile-known-projects)))
+      (dolist (path desired)
+        (unless (member path projectile-known-projects)
+          (projectile-add-known-project path)))
+      (dolist (path managed)
+        (unless (member path desired)
+          (projectile-remove-known-project path))))))
 
 ;;;; Git status
 
@@ -317,7 +360,11 @@ Registers the project with Projectile when it is not already known."
                          (list 'init/project-panel-url url))))
 
 (defun init/project-panel--render ()
-  "Rebuild the panel buffer, keeping point on the same repo if possible."
+  "Rebuild the panel buffer, keeping point on the same repo if possible.
+Also syncs the clone set into Projectile's known projects; this runs
+even when the panel window is closed, so an async clone or fetch that
+finishes in the background still updates Projectile."
+  (init/project-panel--sync-projectile)
   (let ((buffer (get-buffer init/project-panel-buffer-name)))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer

@@ -126,13 +126,11 @@ MENU is an easy-menu item list; HELP is the tooltip."
                 (define-key map [header-line mouse-1]
                             (lambda (event)
                               (interactive "e")
-                              (let* ((keymap (easy-menu-create-menu nil menu))
-                                     (choice (x-popup-menu event keymap)))
-                                (when choice
-                                  (let ((cmd (lookup-key keymap (apply #'vector choice))))
-                                    (when (commandp cmd)
-                                      (with-selected-window (posn-window (event-start event))
-                                        (call-interactively cmd))))))))
+                              ;; Loaded lazily: this file is required before
+                              ;; `package-setup' puts posframe on the load path.
+                              (require 'pulldown-menu)
+                              (with-selected-window (posn-window (event-start event))
+                                (pulldown-menu-popup menu event))))
                 map)))
 
 (defun init/toolbar-separator ()
