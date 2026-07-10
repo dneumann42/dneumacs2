@@ -178,5 +178,91 @@
       "--"
       ["Edit Workspaces…"  treemacs-edit-workspaces]))))
 
+;;;; Guard against a $HOME-rooted project
+
+;; A Treemacs project whose root is $HOME forces Treemacs to walk the
+;; entire home directory (every hidden cache, GVFS mount, ...) whenever
+;; that node is expanded or `treemacs-follow-mode' reveals a file under
+;; it -- which freezes Emacs, since almost every file lives under $HOME.
+;; Such a project keeps coming back through the persisted workspace
+;; file, so rather than edit that file (which a running Emacs rewrites
+;; on exit) we strip it every time the workspace is read, before it is
+;; ever parsed or expanded.
+
+(defun init/treemacs--reject-home-projects (lines)
+  "Drop any $HOME-rooted project from persisted-workspace LINES.
+LINES are as returned by `treemacs--read-persist-lines': one string per
+non-blank line.  A workspace left with no projects is dropped whole, so
+the result stays valid (Treemacs requires at least one project per
+workspace, and recreates a default workspace when the input is empty)."
+  (let ((home (expand-file-name "~/"))
+        (blocks '())
+        (cur '()))
+    ;; Split the lines into header-led blocks: each "* workspace" or
+    ;; "** project" line starts a new block that owns the lines below it.
+    (dolist (line lines)
+      (when (or (string-prefix-p "* " line) (string-prefix-p "** " line))
+        (when cur (push (nreverse cur) blocks))
+        (setq cur '()))
+      (push line cur))
+    (when cur (push (nreverse cur) blocks))
+    ;; Re-emit blocks, skipping $HOME projects and holding each workspace
+    ;; header back until one of its projects actually survives.
+    (let (out pending-ws)
+      (dolist (block (nreverse blocks))
+        (let ((header (car block)))
+          (cond
+           ((string-prefix-p "* " header)
+            (setq pending-ws block))
+           ((string-prefix-p "** " header)
+            (unless (seq-some
+                     (lambda (l)
+                       (and (string-match "\\`[[:space:]]*- path :: \\(.*\\)\\'" l)
+                            (equal (file-name-as-directory
+                                    (expand-file-name (match-string 1 l)))
+                                   home)))
+                     block)
+              (when pending-ws
+                (dolist (l pending-ws) (push l out))
+                (setq pending-ws nil))
+              (dolist (l block) (push l out)))))))
+      (nreverse out))))
+
+(defun init/treemacs--home-path-p (path)
+  "Return non-nil when PATH resolves to $HOME."
+  (and (stringp path)
+       (equal (file-name-as-directory (expand-file-name path))
+              (expand-file-name "~/"))))
+
+(defun init/treemacs--block-home-project (fn path name &rest args)
+  "Refuse to add $HOME as a Treemacs project (FN is the wrapped adder).
+Filtering the persisted workspace only helps at load time; something
+re-adds $HOME during a session and then persists it.  This blocks the
+add at its single choke point regardless of the caller, and appends a
+backtrace to .cache/treemacs-home-block.log so the culprit is visible.
+Returns the documented `invalid-path' result so callers stay happy."
+  (if (init/treemacs--home-path-p path)
+      (progn
+        (ignore-errors
+          (let ((log (expand-file-name ".cache/treemacs-home-block.log"
+                                       user-emacs-directory)))
+            (with-temp-buffer
+              (insert (format "\n=== %s  blocked $HOME project add (name=%S) ===\n"
+                              (format-time-string "%F %T") name))
+              (insert (format "this-command=%S  real-this-command=%S\n"
+                              this-command real-this-command))
+              (dolist (frame (backtrace-frames))
+                (insert (format "  %S\n" (nth 1 frame))))
+              (append-to-file (point-min) (point-max) log))))
+        (message "Treemacs: refused $HOME as a project root (see treemacs-home-block.log)")
+        `(invalid-path "Refusing $HOME as a Treemacs project root."))
+    (apply fn path name args)))
+
+(with-eval-after-load 'treemacs
+  (advice-add 'treemacs--read-persist-lines
+              :filter-return #'init/treemacs--reject-home-projects)
+  (advice-add 'treemacs-do-add-project-to-workspace
+              :around #'init/treemacs--block-home-project))
+
 (provide 'treemacs-setup)
 ;;; treemacs-setup.el ends here
