@@ -3,6 +3,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'font-tools)
+(require 'toolbar)               ; for `init/toolbar--help-echo'
 (require 'pulldown-menu)
 (require 'init-persist)
 
@@ -203,21 +204,34 @@ existing mode-sensitive menu-bar menus that become submenus.")
                     `(menu-item ,(car entry) ,(cdr entry)))))
     menu))
 
+(defun init/tab-bar--menu-entries ()
+  "Return an alist of (KEY . (LABEL . KEYMAP)) for the top-level menu bar."
+  (let (entries)
+    (map-keymap
+     (lambda (key binding)
+       (when-let ((entry (init/tab-bar--menu-entry binding)))
+         (push (cons key entry) entries)))
+     (menu-bar-keymap))
+    entries))
+
+(defun init/tab-bar--map-groups (fn)
+  "Call FN with (KEY LABEL MENU) for each non-empty group, in order.
+Groups are defined by `init/tab-bar-menu-groups'; shared by the tab-bar
+buttons and the keyboard `init/menu-bar-open'."
+  (let ((entries (init/tab-bar--menu-entries)))
+    (dolist (group init/tab-bar-menu-groups)
+      (pcase-let ((`(,key ,label . ,members) group))
+        (let ((menu (init/tab-bar--group-menu label members entries)))
+          (when (> (length menu) 2)
+            (funcall fn key label menu)))))))
+
 (defun init/tab-bar-menu-format ()
-  "Return four grouped tab-bar menus, or nil when the menu is hidden."
+  "Return the grouped menu-bar buttons for the tab bar, or nil when hidden."
   (when (init/menu-bar-desired-p)
-    (let (entries items)
-      (map-keymap
-       (lambda (key binding)
-         (when-let ((entry (init/tab-bar--menu-entry binding)))
-           (push (cons key entry) entries)))
-       (menu-bar-keymap))
-      (dolist (group init/tab-bar-menu-groups)
-        (pcase-let ((`(,key ,label . ,members) group))
-          (let ((menu (init/tab-bar--group-menu label members entries)))
-            (when (> (length menu) 2)
-              (push
-               `(,key menu-item
+    (let (items)
+      (init/tab-bar--map-groups
+       (lambda (key label menu)
+         (push `(,key menu-item
                       ,(propertize (concat " " label " ")
                                    'face 'tab-bar-tab-inactive
                                    'mouse-face 'highlight)
@@ -225,7 +239,7 @@ existing mode-sensitive menu-bar menus that become submenus.")
                          (interactive "e")
                          (pulldown-menu-popup menu event))
                       :help ,label)
-               items)))))
+               items)))
       ;; Append a stretch that fills to the right edge with the `tab-bar'
       ;; face, so the bar and its bottom border span the whole frame width
       ;; instead of stopping after the last button.
@@ -238,20 +252,12 @@ existing mode-sensitive menu-bar menus that become submenus.")
                         ignore)))))))
 
 (defun init/menu-bar--combined-keymap ()
-  "Return one keymap holding every tab-bar menu group as a submenu.
+  "Return one keymap holding every menu-bar group as a submenu.
 Lets the menu bar be opened and navigated entirely from the keyboard."
-  (let (entries (top (make-sparse-keymap "Menu")))
-    (map-keymap
-     (lambda (key binding)
-       (when-let ((entry (init/tab-bar--menu-entry binding)))
-         (push (cons key entry) entries)))
-     (menu-bar-keymap))
-    ;; `define-key' prepends, so add groups in reverse to keep File..Guides.
-    (dolist (group (reverse init/tab-bar-menu-groups))
-      (pcase-let ((`(,key ,label . ,members) group))
-        (let ((menu (init/tab-bar--group-menu label members entries)))
-          (when (> (length menu) 2)
-            (define-key top (vector key) `(menu-item ,label ,menu))))))
+  (let ((top (make-sparse-keymap "Menu")))
+    (init/tab-bar--map-groups
+     (lambda (key label menu)
+       (define-key-after top (vector key) `(menu-item ,label ,menu))))
     top))
 
 (defun init/menu-bar-open ()

@@ -137,9 +137,9 @@ TYPE is `:toggle' or `:radio'; ON is the evaluated on/off state."
 
 (defun pulldown-menu--prefix (item)
   "Return the two-column check/radio prefix string for ITEM."
-  (pcase (car-safe (plist-get item :state))
-    (:toggle (if (cdr (plist-get item :state)) "☑ " "☐ "))
-    (:radio  (if (cdr (plist-get item :state)) "◉ " "○ "))
+  (pcase (plist-get item :state)
+    (`(:toggle . ,on) (if on "☑ " "☐ "))
+    (`(:radio . ,on) (if on "◉ " "○ "))
     (_ "  ")))
 
 (defun pulldown-menu--make-item (label binding enabled &optional keys state)

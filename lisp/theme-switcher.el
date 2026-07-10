@@ -57,9 +57,8 @@ preview and startup loads retain their temporary behavior."
     (mapc #'disable-theme custom-enabled-themes)
     (condition-case error-data
         (prog1 (funcall original theme no-confirm no-enable)
-          (setq init/selected-theme theme
-                init/theme--previewed theme)
-          (init/theme--save theme)
+          (setq init/theme--previewed theme)
+          (init/theme--save theme)          ; sets `init/selected-theme' and persists
           (message "Theme %s selected and saved" theme))
       (error
        (when (init/theme--available-p init/selected-theme)
@@ -216,8 +215,7 @@ see the theme before committing to it; press RET to keep the
 highlighted one or C-g to cancel and restore the previous theme."
   (interactive (list (init/theme--read-with-live-preview)))
   (init/theme--apply theme)
-  (setq init/selected-theme theme)
-  (init/theme--save theme)
+  (init/theme--save theme)              ; sets `init/selected-theme' and persists
   (message "Theme %s selected and saved" theme))
 
 ;; Historical name; `init/theme-select' now does the live preview itself.

@@ -1,6 +1,7 @@
 ;;; font-tools.el --- Shared font discovery and installation -*- lexical-binding: t; -*-
 
 (require 'cl-lib)
+(require 'init-persist)          ; for `init/atomic-write-file'
 
 (defconst init/font-directory (expand-file-name "~/.local/share/fonts/")
   "Directory where downloaded user fonts are installed.")
@@ -36,16 +37,13 @@
 
 (defun init/font--download (url target)
   "Download URL atomically to TARGET using curl."
-  (let ((temporary (make-temp-file "emacs-font-download-")))
-    (unwind-protect
-        (progn
-          (unless (zerop (call-process
-                          "curl" nil nil nil "-L" "--fail" "--silent"
-                          "--show-error" "--output" temporary url))
-            (error "Failed to download %s" url))
-          (rename-file temporary target t))
-      (when (file-exists-p temporary)
-        (delete-file temporary)))))
+  (init/atomic-write-file
+   target
+   (lambda (temporary)
+     (unless (zerop (call-process
+                     "curl" nil nil nil "-L" "--fail" "--silent"
+                     "--show-error" "--output" temporary url))
+       (error "Failed to download %s" url)))))
 
 (defun init/font-install-files (files)
   "Install font FILES, an alist of destination names and download URLs."
