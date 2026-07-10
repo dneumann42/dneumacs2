@@ -13,6 +13,7 @@
 (require 'cl-lib)
 (require 'subr-x)
 (require 'compile)
+(require 'nim-doc)
 (eval-when-compile (require 'flycheck))
 (declare-function flycheck-define-checker "flycheck")
 (declare-function flycheck-define-command-checker "flycheck")
@@ -662,7 +663,11 @@ case nimsuggest was installed or added to PATH afterwards."
               init/ide-run-function #'init/nim-run
               init/ide-goto-definition-function #'init/nim-goto-definition)
   (init/ide-mode 1)
-  (local-set-key (kbd bind/nim-mark-token) #'init/nim-mark-token))
+  (local-set-key (kbd bind/nim-mark-token) #'init/nim-mark-token)
+  (local-set-key (kbd bind/nim-doc-search) #'init/nim-doc-search)
+  (local-set-key (kbd bind/nim-doc-at-point) #'init/nim-doc-at-point)
+  (local-set-key (kbd bind/nim-doc-module) #'init/nim-doc-module)
+  (local-set-key (kbd bind/nim-doc-home) #'init/nim-doc-home))
 
 (use-package nim-mode
   :mode ("\\.nim\\'" "\\.nims\\'" "\\.nimble\\'")
@@ -707,6 +712,15 @@ Ensures tests/ directory and config.nims exist, then opens the new file."
       (with-temp-file file
         (insert (format "import unittest\n\n\nsuite \"%s\":\n\n  test \"\":\n    check true\n" name))))
     (find-file file)))
+
+(with-eval-after-load 'which-key
+  (when (fboundp 'which-key-add-major-mode-key-based-replacements)
+    (which-key-add-major-mode-key-based-replacements 'nim-mode
+      "C-c n" "nim docs"
+      bind/nim-doc-search "search docs index"
+      bind/nim-doc-at-point "docs at point"
+      bind/nim-doc-module "module docs"
+      bind/nim-doc-home "stdlib overview")))
 
 (provide 'nim)
 ;;; nim.el ends here

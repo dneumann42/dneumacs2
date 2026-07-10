@@ -117,6 +117,14 @@
   "Key sequence for the OCaml keybinding help buffer.")
 (defconst bind/nim-mark-token "C-M-SPC"
   "Key sequence for marking the Nim token at point.")
+(defconst bind/nim-doc-search "C-c n n"
+  "Key sequence for searching the Nim documentation index.")
+(defconst bind/nim-doc-at-point "C-c n d"
+  "Key sequence for opening docs for the Nim symbol at point.")
+(defconst bind/nim-doc-module "C-c n m"
+  "Key sequence for opening a Nim module's documentation page.")
+(defconst bind/nim-doc-home "C-c n h"
+  "Key sequence for opening the Nim standard library overview.")
 
 ;;;; Shared IDE minor mode
 ;; The common command layer lives in init-lsp.el; the commands are bound
