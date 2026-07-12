@@ -36,6 +36,7 @@
 (require 'eww-setup)
 (require 'c-tools)
 (require 'nim)
+(require 'nest-mode)
 (require 'rust)
 (require 'init-python)
 (require 'lua)

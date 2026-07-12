@@ -66,3 +66,4 @@ persisted-vars.el
 theme-state.el
 menu-bar-state.el
 toolbar-state.el
+*.so
