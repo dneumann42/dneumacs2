@@ -87,11 +87,17 @@
   :ensure t
   :custom
   (yas-snippet-dirs '("~/.emacs.d/snippets"))
+  (yas-prompt-functions '(yas-completing-prompt yas-no-prompt))
   :bind (("C-c ." . yas-insert-snippet))
   :hook ((text-mode
           prog-mode
           conf-mode
-          snippet-mode) . yas-minor-mode-on))
+          snippet-mode
+          org-mode) . yas-minor-mode-on)
+  :config
+  (with-eval-after-load 'org
+    (define-key org-mode-map (kbd "C-c y") #'yas-insert-snippet)
+    (define-key org-mode-map (kbd "M-TAB") #'yas-expand)))
 
 (use-package yasnippet-snippets
   :ensure t

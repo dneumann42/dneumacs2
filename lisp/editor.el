@@ -518,6 +518,19 @@ under lisp/ from `features' first makes those requires re-load in order."
   (set-face-foreground 'highlight-indent-guides-top-character-face "#5d6aa8")
   (set-face-foreground 'highlight-indent-guides-stack-character-face "#8a6a9f"))
 
+;;;; Colorful mode
+;; Hex and rgb colors rendered
+(use-package colorful-mode
+  ;; :diminish
+  ;; :ensure t ; Optional
+  :custom
+  (colorful-use-prefix t)
+  (colorful-only-strings 'only-prog)
+  (css-fontify-colors nil)
+  :config
+  (global-colorful-mode t)
+  (add-to-list 'global-colorful-modes 'helpful-mode))
+
 ;;;; Run/build panel
 
 ;; The *compilation* buffer -- plain `compile', nim run, and the

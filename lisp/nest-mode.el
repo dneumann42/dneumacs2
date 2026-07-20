@@ -11,12 +11,12 @@
   :group 'nest)
 
 (defconst nest-mode-keywords
-  '("define" "events" "when" "command" "import" "export"))
+  '("define" "events" "when" "command" "import" "export" "fun" "record" "if" "cond" "unless" "while"))
 
 (defconst nest-mode-builtins
   '("id" "LineInputState" "EditLineState"
     "fill" "fit" "fixed" "hug" "prefer"
-    "clicked" "submitted" "not" "scope"
+    "clicked" "submitted" "not" "scope" "exec"
     "env" "split" "loadLines" "writeLines"
     "appendLine" "insertLine" "setLine" "deleteLine"
     "setText" "browseFolder" "exec" "execStatus"
@@ -79,19 +79,50 @@ Return non-nil when such a line exists."
 (defun nest--previous-opens-block-p ()
   "Return non-nil when the previous code line ends with a block colon."
   (save-excursion
-    (and (nest--previous-code-line)
-         (end-of-line)
-         (skip-chars-backward " \t")
-         (eq (char-before) ?:))))
+    (when (nest--previous-code-line)
+      (nest--line-opens-block-p))))
+
+(defun nest--line-opens-block-p ()
+  "Return non-nil when the current line ends with a block colon."
+  (save-excursion
+    (end-of-line)
+    (skip-chars-backward " \t")
+    (eq (char-before) ?:)))
+
+(defun nest--previous-enclosing-line (indent)
+  "Move to the previous code line whose indentation is less than INDENT.
+Return non-nil when such a line exists."
+  (let ((found nil))
+    (while (and (not found) (nest--previous-code-line))
+      (when (< (current-indentation) indent)
+        (setq found t)))
+    found))
+
+(defun nest--indent-after-current-line ()
+  "Return indentation for a new line after the previous code line."
+  (let ((base (nest--previous-indent)))
+    (if (nest--previous-opens-block-p)
+        (+ base nest-indent-offset)
+      base)))
+
+(defun nest--indent-existing-line (indent)
+  "Return desired indentation for an existing line currently at INDENT."
+  (if (zerop indent)
+      0
+    (save-excursion
+      (if (nest--previous-enclosing-line indent)
+          (if (nest--line-opens-block-p)
+              (+ (current-indentation) nest-indent-offset)
+            (current-indentation))
+        indent))))
 
 (defun nest-calculate-indentation ()
   "Return desired indentation for the current line."
   (save-excursion
     (back-to-indentation)
-    (let ((base (nest--previous-indent)))
-      (if (nest--previous-opens-block-p)
-          (+ base nest-indent-offset)
-        base))))
+    (if (nest--line-blank-or-comment-p)
+        (nest--indent-after-current-line)
+      (nest--indent-existing-line (current-indentation)))))
 
 (defun nest-indent-line ()
   "Indent current line as Nest DSL."

@@ -2,6 +2,7 @@
 
 (require 'font-tools)
 (require 'org-sync)
+(require 'subr-x)
 
 (declare-function calendar-current-date "calendar")
 (declare-function org-at-heading-p "org")
@@ -65,23 +66,118 @@ Uses the shared font installation flow and returns nil when unavailable."
    :installer #'init/org-install-writer-font
    :require-graphic t))
 
-(defcustom init/org-fill-column 80
-  "Visual line width for Org buffers."
-  :type 'integer
+(defface init/org-table-header
+  '((default :inherit org-table :weight bold :extend t)
+    (((background light))
+     :background "#dfeaf7" :foreground "#172033" :overline "#9fb9d8")
+    (t
+     :background "#151f2a" :foreground "#d8ecff" :overline "#3d6f94"))
+  "Face used for Org table header rows."
   :group 'org)
 
+(defface init/org-table-stripe
+  '((default :inherit org-table :extend t)
+    (((background light)) :background "#f3f6fa")
+    (t :background "#0b0f14"))
+  "Face used for alternating Org table body rows."
+  :group 'org)
+
+(defun init/org--table-separator-line-p ()
+  "Return non-nil when the current line is an Org table separator."
+  (save-excursion
+    (back-to-indentation)
+    (looking-at-p "|[-+]+|?[ \t]*$")))
+
+(defun init/org--table-line-p ()
+  "Return non-nil when the current line is an Org table row."
+  (save-excursion
+    (back-to-indentation)
+    (looking-at-p "|.*|[ \t]*$")))
+
+(defun init/org--table-body-row-index ()
+  "Return the zero-based body row index for the current Org table row."
+  (let ((target (line-beginning-position))
+        (seen-separator nil)
+        (row-index 0))
+    (save-excursion
+      (while (and (= 0 (forward-line -1))
+                  (init/org--table-line-p)))
+      (unless (init/org--table-line-p)
+        (forward-line 1))
+      (while (< (line-beginning-position) target)
+        (if (init/org--table-separator-line-p)
+            (setq seen-separator t)
+          (when seen-separator
+            (setq row-index (1+ row-index))))
+        (forward-line 1)))
+    (when seen-separator row-index)))
+
+(defun init/org-table-row-face ()
+  "Return the display face for the current Org table row."
+  (save-excursion
+    (beginning-of-line)
+    (cond
+     ((init/org--table-separator-line-p) nil)
+     ((save-excursion
+        (and (= 0 (forward-line 1))
+             (init/org--table-separator-line-p)))
+      'init/org-table-header)
+     ((let ((row-index (init/org--table-body-row-index)))
+        (and row-index (= 1 (% row-index 2))))
+      'init/org-table-stripe))))
+
+(defconst init/org-writer-font-height 1.3
+  "Relative height used for Org prose.")
+
+(defconst init/org-fixed-pitch-font-height 1.0
+  "Relative height used for fixed-pitch Org regions.")
+
+(defun init/org--refresh-visual-fill-column ()
+  "Refresh Org's visual layout for the current text scale."
+  (when (derived-mode-p 'org-mode)
+    (redisplay t)))
+
+(defun init/org-insert-src-block (language)
+  "Insert an Org source block for LANGUAGE with useful defaults."
+  (interactive
+   (list (completing-read "Language: " (delete-dups (mapcar #'car org-babel-load-languages))
+                          nil nil nil nil "emacs-lisp")))
+  (insert (format "#+begin_src %s :results value :exports both\n\n#+end_src" language))
+  (forward-line -1))
+
 (defun init/org-line-wrap-setup ()
-  "Soft-wrap Org prose at `init/org-fill-column' columns.
+  "Soft-wrap Org prose at the window edge.
 `visual-line-mode' wraps on word boundaries without inserting hard
-newlines; `visual-fill-column-mode' pins the wrap point (and the text
-column) to `fill-column' instead of the window edge."
-  (setq-local fill-column init/org-fill-column)
-  (visual-line-mode 1)
-  (when (fboundp 'visual-fill-column-mode)
-    (visual-fill-column-mode 1)))
+newlines."
+  (visual-line-mode 1))
 
 (defvar-local init/org--writer-font-remap nil
   "Face-remap cookie for the writer font in the current Org buffer.")
+
+(defvar-local init/org--fixed-pitch-font-remap nil
+  "Face-remap cookie for scaled fixed-pitch regions in Org buffers.")
+
+(defun init/org--text-scale-factor ()
+  "Return the current buffer's text scale multiplier."
+  (expt (if (boundp 'text-scale-mode-step) text-scale-mode-step 1.2)
+        (if (boundp 'text-scale-mode-amount) text-scale-mode-amount 0)))
+
+(defun init/org--refresh-fixed-pitch-font-remap ()
+  "Keep fixed-pitch Org regions in step with Org prose scaling."
+  (when (derived-mode-p 'org-mode)
+    (when init/org--fixed-pitch-font-remap
+      (face-remap-remove-relative init/org--fixed-pitch-font-remap))
+    (setq init/org--fixed-pitch-font-remap
+          (face-remap-add-relative
+           'fixed-pitch
+           :height (* init/org-fixed-pitch-font-height
+                      (init/org--text-scale-factor))))))
+
+(defun init/org--refresh-layout-after-text-scale (&rest _)
+  "Refresh Org font remaps and visual layout after text-scale changes."
+  (when (derived-mode-p 'org-mode)
+    (init/org--refresh-fixed-pitch-font-remap)
+    (init/org--refresh-visual-fill-column)))
 
 (defun init/org-writer-font-setup ()
   "Use the writerly font and comfortable spacing in this Org buffer only.
@@ -93,7 +189,8 @@ the org :config block."
           ;; text sits comfortably next to the monospace UI.
           (face-remap-add-relative 'variable-pitch
                                    :family family
-                                   :height 1.3)))
+                                   :height init/org-writer-font-height)))
+  (init/org--refresh-fixed-pitch-font-remap)
   (variable-pitch-mode 1)
   (setq-local line-spacing 0.15))
 
@@ -175,15 +272,243 @@ different date instead of using today."
                         :height (cdr face-height)
                         :weight 'semi-bold)))
 
+(defvar init/org-reference-popup-buffer-name "*Org Reference*"
+  "Buffer used for the Org reference popup.")
+
+(defvar init/org-reference-popup-source-buffer nil
+  "Org buffer that owns the visible reference popup.")
+
+(defvar init/org-reference-popup-source-point nil
+  "Buffer position that opened the visible reference popup.")
+
+(defvar init/org-reference-popup-target nil
+  "Org reference target shown in the visible popup.")
+
+(defvar init/org-reference-popup-trigger nil
+  "How the current Org reference popup was opened: `manual' or `hover'.")
+
+(defvar init/org-reference-hover-timer nil
+  "Idle timer used to show Org reference popups on mouse hover.")
+
+(defcustom init/org-reference-hover-delay 0.35
+  "Idle delay before showing an Org reference popup under the mouse."
+  :type 'number
+  :group 'org)
+
+(defun init/org-reference--link-target (&optional point)
+  "Return the local Org link target at POINT or point."
+  (save-excursion
+    (when point
+      (goto-char point))
+    (let ((context (org-element-context)))
+      (when (eq (org-element-type context) 'link)
+        (let ((type (org-element-property :type context))
+              (path (org-element-property :path context)))
+          (when (and path (member type '("fuzzy" "custom-id")))
+            path))))))
+
+(defun init/org-reference--target-position (target)
+  "Return the position of TARGET in the current Org buffer."
+  (save-excursion
+    (save-restriction
+      (widen)
+      (goto-char (point-min))
+      (cond
+       ((re-search-forward (format "<<%s>>" (regexp-quote target)) nil t)
+        (line-beginning-position))
+       ((re-search-forward (format "^[[:space:]]*:CUSTOM_ID:[[:space:]]+%s[[:space:]]*$"
+                                   (regexp-quote target))
+                           nil t)
+        (line-beginning-position))
+       ((ignore-errors
+          (org-link-search target)
+          (point)))))))
+
+(defun init/org-open-reference-with-xref ()
+  "Open the local Org reference at point and push the xref marker stack."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Org reference navigation is only available in Org buffers"))
+  (unless (init/org-reference--link-target)
+    (user-error "Point is not on a local Org reference link"))
+  (require 'xref)
+  (xref-push-marker-stack)
+  (org-open-at-point))
+
+(defun init/org-reference--content (target)
+  "Return display text for local Org TARGET."
+  (when-let* ((pos (init/org-reference--target-position target)))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char pos)
+        (let ((start (point))
+              (end (save-excursion
+                     (if (org-at-heading-p)
+                         (save-restriction
+                           (org-narrow-to-subtree)
+                           (goto-char (point-min))
+                           (if (re-search-forward "^[[:space:]]*$" nil t)
+                               (line-beginning-position)
+                             (point-max)))
+                       (if (re-search-forward "^[[:space:]]*$" nil t)
+                           (line-beginning-position)
+                         (line-end-position))))))
+          (string-trim
+           (replace-regexp-in-string
+            (format "<<%s>>[[:space:]]*" (regexp-quote target))
+            ""
+            (buffer-substring-no-properties start end))))))))
+
+(defun init/org-reference-popup-visible-p ()
+  "Return non-nil when the Org reference popup is visible."
+  (or init/org-reference-popup-trigger
+      (get-buffer-window init/org-reference-popup-buffer-name t)))
+
+(defun init/org-hide-reference-popup ()
+  "Hide the Org reference popup."
+  (interactive)
+  (setq init/org-reference-popup-source-buffer nil
+        init/org-reference-popup-source-point nil
+        init/org-reference-popup-target nil
+        init/org-reference-popup-trigger nil)
+  (if (fboundp 'posframe-hide)
+      (posframe-hide init/org-reference-popup-buffer-name)
+    (when-let* ((window (get-buffer-window init/org-reference-popup-buffer-name t)))
+      (quit-window nil window))))
+
+(defun init/org-reference--show-at-point (target trigger)
+  "Show TARGET in a popup near point using TRIGGER as popup source."
+  (let* ((content (or (init/org-reference--content target)
+                      (user-error "No local reference found for %s" target)))
+         (buffer (get-buffer-create init/org-reference-popup-buffer-name)))
+    (setq init/org-reference-popup-source-buffer (current-buffer)
+          init/org-reference-popup-source-point (point)
+          init/org-reference-popup-target target
+          init/org-reference-popup-trigger trigger)
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert content)
+        (goto-char (point-min))
+        (org-mode)
+        (setq-local mode-line-format nil)
+        (setq-local cursor-type nil)
+        (setq-local buffer-read-only t)
+        (visual-line-mode 1)))
+    (if (and (display-graphic-p) (require 'posframe nil t))
+        (posframe-show
+         buffer
+         :poshandler 'posframe-poshandler-point-bottom-left-corner
+         :max-width (max 50 (min 90 (floor (* (frame-width) 0.45))))
+         :max-height 12
+         :cursor nil
+         :accept-focus nil
+         :internal-border-width 1
+         :override-parameters '((no-other-window . t)
+                                (no-delete-other-windows . t)))
+      (let ((window (display-buffer
+                     buffer
+                     '((display-buffer-in-side-window)
+                       (side . bottom)
+                       (slot . 0)
+                       (window-parameters . ((no-delete-other-windows . t)
+                                             (no-other-window . t)))))))
+        (when (window-live-p window)
+          (fit-window-to-buffer window 12))))))
+
+(defun init/org-show-reference-popup ()
+  "Show the Org reference linked at point in a small popup near point."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Org reference popup is only available in Org buffers"))
+  (init/org-reference--show-at-point
+   (or (init/org-reference--link-target)
+       (user-error "Point is not on a local Org reference link"))
+   'manual))
+
+(defun init/org-toggle-reference-popup ()
+  "Toggle the Org reference popup for the local reference at point."
+  (interactive)
+  (if (and (init/org-reference-popup-visible-p)
+           (eq init/org-reference-popup-source-buffer (current-buffer))
+           (= init/org-reference-popup-source-point (point)))
+      (init/org-hide-reference-popup)
+    (init/org-show-reference-popup)))
+
+(defun init/org-reference-hide-on-point-move ()
+  "Hide the Org reference popup when its source cursor moves."
+  (when (and init/org-reference-popup-source-buffer
+             (eq init/org-reference-popup-source-buffer (current-buffer))
+             init/org-reference-popup-source-point
+             (/= init/org-reference-popup-source-point (point)))
+    (init/org-hide-reference-popup)))
+
+(defun init/org-reference--mouse-position ()
+  "Return (BUFFER . POINT) for the current mouse position, if any."
+  (pcase-let ((`(,frame ,x . ,y) (mouse-pixel-position)))
+    (when (and (frame-live-p frame) (integerp x) (integerp y))
+      (let* ((posn (posn-at-x-y x y frame t))
+             (window (and posn (posn-window posn)))
+             (point (and posn (posn-point posn))))
+        (when (and (window-live-p window) (integer-or-marker-p point))
+          (cons (window-buffer window) point))))))
+
+(defun init/org-reference-hover-check ()
+  "Show or hide Org reference popup for the link under the mouse."
+  (let ((where (init/org-reference--mouse-position)))
+    (if (not where)
+        (when (eq init/org-reference-popup-trigger 'hover)
+          (init/org-hide-reference-popup))
+      (let ((buffer (car where))
+            (point (cdr where)))
+        (if (not (buffer-live-p buffer))
+            (when (eq init/org-reference-popup-trigger 'hover)
+              (init/org-hide-reference-popup))
+          (with-current-buffer buffer
+            (if (not (derived-mode-p 'org-mode))
+                (when (eq init/org-reference-popup-trigger 'hover)
+                  (init/org-hide-reference-popup))
+              (let ((target (init/org-reference--link-target point)))
+                (cond
+                 ((and target
+                       (or (not (eq init/org-reference-popup-trigger 'hover))
+                           (not (eq init/org-reference-popup-source-buffer buffer))
+                           (/= init/org-reference-popup-source-point point)
+                           (not (equal init/org-reference-popup-target target))))
+                  (when-let* ((window (get-buffer-window buffer t)))
+                    (save-selected-window
+                      (select-window window)
+                      (save-excursion
+                        (goto-char point)
+                        (init/org-reference--show-at-point target 'hover)))))
+                 ((and (not target)
+                       (eq init/org-reference-popup-trigger 'hover))
+                  (init/org-hide-reference-popup)))))))))))
+
+(defun init/org-enable-reference-popups ()
+  "Enable Org reference popup hiding and hover behavior."
+  (add-hook 'post-command-hook #'init/org-reference-hide-on-point-move nil t)
+  (unless (timerp init/org-reference-hover-timer)
+    (setq init/org-reference-hover-timer
+          (run-with-idle-timer init/org-reference-hover-delay t
+                               #'init/org-reference-hover-check))))
+
 (use-package org
   :ensure nil
   :hook ((org-mode . init/org-enable-parent-cookie-tracking)
          (org-mode . init/org-writer-font-setup)
-         (org-mode . init/org-line-wrap-setup))
+         (org-mode . init/org-line-wrap-setup)
+         (org-mode . init/org-enable-reference-popups))
   :bind (("C-c a" . org-agenda)
          ("C-c c" . org-capture)
          ("C-c j" . init/org-goto-journal)
-         ("C-c l" . org-store-link))
+         ("C-c l" . org-store-link)
+         :map org-mode-map
+         ("C-c b" . init/org-insert-src-block)
+         ("C-c C-." . init/org-toggle-reference-popup)
+         ("M-." . init/org-open-reference-with-xref)
+         ("M-," . xref-go-back))
   :custom
   (org-directory init/org-sync-directory)
   ;; Scan the whole org directory for TODOs, SCHEDULED and DEADLINE items.
@@ -195,11 +520,14 @@ different date instead of using today."
   (org-agenda-span 'week)
   ;; Prose-friendly display; org-modern draws the decorations.
   (org-hide-emphasis-markers t)
+  (org-hide-leading-stars t)
   (org-pretty-entities t)
   (org-ellipsis "…")
   (org-auto-align-tags nil)
   (org-tags-column 0)
   (org-agenda-tags-column 0)
+  (org-src-preserve-indentation t)
+  (org-edit-src-content-indentation 0)
   ;; File names below are relative to `org-directory'.  The journal is a
   ;; single entry per day, so it is edited via `init/org-goto-journal'
   ;; rather than captured (capture always appends a new item).
@@ -229,6 +557,20 @@ different date instead of using today."
                   (org-special-keyword . (font-lock-comment-face fixed-pitch))
                   (org-document-info-keyword . (shadow fixed-pitch))))
     (set-face-attribute (car spec) nil :inherit (cdr spec)))
+  (font-lock-add-keywords
+   'org-mode
+   '(("^[ \t]*\\(|.*|\\)[ \t]*$" 0 (init/org-table-row-face) append))
+   'append)
+  (set-face-attribute 'org-level-1 nil :underline t)
+  (dolist (command '(text-scale-adjust
+                     text-scale-increase
+                     text-scale-decrease
+                     text-scale-set))
+    (unless (advice-member-p
+             #'init/org--refresh-layout-after-text-scale
+             command)
+      (advice-add command :after
+                  #'init/org--refresh-layout-after-text-scale)))
   (add-hook 'org-after-todo-state-change-hook
             #'init/org-add-cookie-to-todo-parent)
   (add-hook 'org-after-todo-statistics-hook #'org-summary-todo))
