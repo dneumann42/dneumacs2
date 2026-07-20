@@ -20,10 +20,33 @@
   "Idle seconds after a save before committing and pushing Org changes."
   :type 'number)
 
+(defcustom init/org-sync-merge-union t
+  "When non-nil, merge Org files with Git's union driver.
+Union merges keep both sides of overlapping edits instead of writing
+conflict markers, which suits append-heavy journals and eliminates the
+vast majority of spurious sync conflicts."
+  :type 'boolean)
+
+(defcustom init/org-sync-push-retries 3
+  "How many times to re-integrate and retry a push the remote rejected.
+A rejection normally means another machine pushed between our fetch and
+our push; re-fetching and pushing again resolves it without a conflict."
+  :type 'integer)
+
+(defcustom init/org-sync-fetch-interval 300
+  "Minimum seconds between remote fetches during automatic synchronization.
+Local commits are always integrated and pushed promptly; this only
+throttles how often an otherwise-idle checkout contacts the remote to
+look for new changes, to be gentle on the Git host."
+  :type 'number)
+
 (defvar init/org-sync--timer nil)
 (defvar init/org-sync--process nil)
 (defvar init/org-sync--pending nil)
 (defvar init/org-sync--inhibit nil)
+(defvar init/org-sync--push-attempt 0)
+(defvar init/org-sync--last-fetch nil
+  "`float-time' of the last successful fetch, or nil when never fetched.")
 (defvar init/org-sync--process-buffer " *org-git-sync*")
 
 (defun init/org-sync--git (&rest arguments)
@@ -43,7 +66,54 @@ Return a cons of exit status and trimmed combined output."
              (if (string-empty-p output) "" (concat ": " output))))
     output))
 
+(defconst init/org-sync--gitattributes-line "*.org merge=union"
+  "Attribute entry enabling conflict-free union merges for Org files.")
+
+(defun init/org-sync--ensure-gitattributes ()
+  "Ensure Org files are configured to merge with the union driver.
+Idempotent; leaves any existing `.gitattributes' content untouched."
+  (when init/org-sync-merge-union
+    (let* ((file (expand-file-name ".gitattributes" init/org-sync-directory))
+           (existing (when (file-readable-p file)
+                       (with-temp-buffer
+                         (insert-file-contents file)
+                         (buffer-string)))))
+      (unless (and existing
+                   (string-match-p
+                    (concat "^[ \t]*"
+                            (regexp-quote init/org-sync--gitattributes-line)
+                            "[ \t]*$")
+                    existing))
+        (let ((init/org-sync--inhibit t))
+          (with-temp-file file
+            (when (and existing (not (string-empty-p existing)))
+              (insert existing)
+              (unless (string-suffix-p "\n" existing)
+                (insert "\n")))
+            (insert init/org-sync--gitattributes-line "\n")))))))
+
+(defun init/org-sync--abort-operation ()
+  "Abort any in-progress rebase, merge, cherry-pick, or revert."
+  (pcase (init/org-sync--operation-in-progress)
+    ("rebase" (init/org-sync--git "rebase" "--abort"))
+    ("merge" (init/org-sync--git "merge" "--abort"))
+    ("cherry-pick" (init/org-sync--git "cherry-pick" "--abort"))
+    ("revert" (init/org-sync--git "revert" "--abort"))))
+
+(defun init/org-sync--push-rejected-p (output)
+  "Return non-nil when push OUTPUT indicates the remote simply moved ahead."
+  (and output
+       (string-match-p
+        "non-fast-forward\\|fetch first\\|\\[rejected\\]\\|stale info"
+        output)))
+
 (defun init/org-sync-ensure-repository ()
+  "Clone the Org repository when its checkout does not exist."
+  (prog1
+      (init/org-sync--ensure-repository-1)
+    (ignore-errors (init/org-sync--ensure-gitattributes))))
+
+(defun init/org-sync--ensure-repository-1 ()
   "Clone the Org repository when its checkout does not exist."
   (cond
    ((file-directory-p (expand-file-name ".git" init/org-sync-directory)) t)
@@ -116,9 +186,16 @@ Return a cons of exit status and trimmed combined output."
   (magit-status init/org-sync-directory))
 
 (defun init/org-sync--ensure-no-conflict ()
-  "Stop automatic synchronization while unresolved conflicts exist."
-  (let ((files (init/org-sync--unmerged-files))
-        (operation (init/org-sync--operation-in-progress)))
+  "Recover from interrupted Git operations before editing.
+An operation left behind with a clean tree (for example an aborted-but-
+not-cleaned rebase) is undone automatically; only genuine unresolved
+conflicts stop automatic synchronization and hand off to Magit."
+  (let ((operation (init/org-sync--operation-in-progress))
+        (files (init/org-sync--unmerged-files)))
+    (when (and operation (string-empty-p files))
+      (init/org-sync--abort-operation)
+      (setq operation (init/org-sync--operation-in-progress)
+            files (init/org-sync--unmerged-files)))
     (when (or operation (not (string-empty-p files)))
       (init/org-sync--open-magit
        (if (string-empty-p files)
@@ -133,8 +210,40 @@ Return a cons of exit status and trimmed combined output."
                                     "--symbolic-full-name" "@{upstream}")))
     (and (zerop status) (not (string-empty-p output)) output)))
 
+(defun init/org-sync--ahead-count ()
+  "Return the number of local commits not yet on the upstream.
+Return 0 when there is no upstream or the count cannot be determined."
+  (if-let ((upstream (init/org-sync--upstream)))
+      (pcase-let ((`(,status . ,output)
+                   (init/org-sync--git "rev-list" "--count"
+                                       (concat upstream "..HEAD"))))
+        (if (and (zerop status) (string-match-p "\\`[0-9]+\\'" output))
+            (string-to-number output)
+          0))
+    0))
+
+(defun init/org-sync--fetch-due-p ()
+  "Return non-nil when enough time has passed to fetch the remote again."
+  (or (null init/org-sync--last-fetch)
+      (>= (- (float-time) init/org-sync--last-fetch)
+          init/org-sync-fetch-interval)))
+
+(defun init/org-sync--dirty-p ()
+  "Return non-nil when the working tree has uncommitted changes."
+  (not (string-empty-p (cdr (init/org-sync--git "status" "--porcelain")))))
+
+(defun init/org-sync--sync-needed-p ()
+  "Return non-nil when synchronization has real work to do.
+That means local commits to push, unsaved or uncommitted local changes,
+or a remote check that has become due."
+  (or (> (init/org-sync--ahead-count) 0)
+      (init/org-sync--modified-repository-buffers-p)
+      (init/org-sync--dirty-p)
+      (init/org-sync--fetch-due-p)))
+
 (defun init/org-sync--commit-local-changes ()
   "Stage and commit local changes, amending an unpushed autosync commit."
+  (init/org-sync--ensure-gitattributes)
   (init/org-sync--git-success "add" "--all")
   (unless (zerop (car (init/org-sync--git "diff" "--cached" "--quiet")))
     (let* ((upstream (init/org-sync--upstream))
@@ -150,17 +259,48 @@ Return a cons of exit status and trimmed combined output."
         (init/org-sync--git-success
          "commit" "-m" (format-time-string "autosync: %Y-%m-%d %H:%M:%S"))))))
 
+(defun init/org-sync--integrate (upstream)
+  "Integrate UPSTREAM into HEAD, recovering automatically from conflicts.
+Try a rebase first; if it fails, abort it so the tree is never left in a
+half-finished state, then fall back to a merge (which the union driver
+resolves without markers).  Only a genuine, unmergeable conflict is
+handed off to Magit."
+  (pcase-let ((`(,status . ,output) (init/org-sync--git "rebase" upstream)))
+    (unless (zerop status)
+      (init/org-sync--git "rebase" "--abort")
+      (pcase-let ((`(,mstatus . ,moutput)
+                   (init/org-sync--git "merge" "--no-edit" upstream)))
+        (unless (zerop mstatus)
+          (init/org-sync--open-magit
+           (cond ((not (string-empty-p moutput)) moutput)
+                 ((not (string-empty-p output)) output)
+                 (t "merge failed")))
+          (user-error
+           "Org sync stopped at a Git conflict; resolve it in Magit"))))))
+
 (defun init/org-sync--pull-and-push ()
-  "Synchronously fetch, rebase onto the upstream, and push."
-  (init/org-sync--git-success "fetch" "--prune" "origin")
-  (when-let ((upstream (init/org-sync--upstream)))
-    (pcase-let ((`(,status . ,output)
-                 (init/org-sync--git "rebase" upstream)))
-      (unless (zerop status)
-        (init/org-sync--open-magit
-         (if (string-empty-p output) "rebase failed" output))
-        (user-error "Org sync stopped at a Git conflict; resolve it in Magit"))))
-  (init/org-sync--git-success "push"))
+  "Synchronously fetch, integrate the upstream, and push.
+Retry when the remote advanced between fetch and push."
+  (let ((attempts 0))
+    (catch 'done
+      (while t
+        (init/org-sync--git-success "fetch" "--prune" "origin")
+        (setq init/org-sync--last-fetch (float-time))
+        (when-let ((upstream (init/org-sync--upstream)))
+          (init/org-sync--integrate upstream))
+        ;; Only reach for the network to push when we actually have commits
+        ;; the remote lacks.
+        (when (zerop (init/org-sync--ahead-count))
+          (throw 'done t))
+        (pcase-let ((`(,status . ,output) (init/org-sync--git "push")))
+          (cond
+           ((zerop status) (throw 'done t))
+           ((and (< attempts init/org-sync-push-retries)
+                 (init/org-sync--push-rejected-p output))
+            (cl-incf attempts))
+           (t (error "git push failed%s"
+                     (if (string-empty-p output) ""
+                       (concat ": " output))))))))))
 
 (defun init/org-sync-now ()
   "Synchronously save, commit, fetch, rebase, and push the Org repository."
@@ -242,29 +382,59 @@ Return a cons of exit status and trimmed combined output."
              init/org-sync--pending t)
        (init/org-sync--schedule))
       (t
+       (setq init/org-sync--last-fetch (float-time))
        (init/org-sync--async-rebase))))))
 
+(defun init/org-sync--async-maybe-push ()
+  "Push only when there are local commits the remote still lacks."
+  (if (> (init/org-sync--ahead-count) 0)
+      (init/org-sync--async-push)
+    (init/org-sync--async-finished)))
+
 (defun init/org-sync--async-rebase ()
-  "Asynchronously rebase onto the upstream, then push."
+  "Asynchronously integrate the upstream, then push.
+On a rebase conflict, abort and fall back to a merge so the tree is
+never left mid-rebase; the union driver resolves overlapping edits."
   (if-let ((upstream (init/org-sync--upstream)))
       (init/org-sync--start-process
        (list "rebase" upstream)
        (lambda (status output)
          (if (zerop status)
-             (init/org-sync--async-push)
-           (init/org-sync--async-finished
-            (if (string-empty-p output) "rebase failed" output)))))
-    (init/org-sync--async-push)))
+             (init/org-sync--async-maybe-push)
+           (init/org-sync--git "rebase" "--abort")
+           (init/org-sync--async-merge upstream output))))
+    (init/org-sync--async-maybe-push)))
+
+(defun init/org-sync--async-merge (upstream rebase-output)
+  "Fall back to merging UPSTREAM after a rebase failed with REBASE-OUTPUT."
+  (init/org-sync--start-process
+   (list "merge" "--no-edit" upstream)
+   (lambda (status output)
+     (if (zerop status)
+         (init/org-sync--async-maybe-push)
+       ;; A genuine, unmergeable conflict remains; leave it for Magit.
+       (init/org-sync--async-finished
+        (cond ((not (string-empty-p output)) output)
+              ((not (string-empty-p rebase-output)) rebase-output)
+              (t "merge failed")))))))
 
 (defun init/org-sync--async-push ()
-  "Push asynchronously and finish the current synchronization."
+  "Push asynchronously; re-integrate and retry if the remote advanced."
   (init/org-sync--start-process
    '("push")
    (lambda (status output)
-     (if (zerop status)
-         (init/org-sync--async-finished)
+     (cond
+      ((zerop status)
+       (setq init/org-sync--push-attempt 0)
+       (init/org-sync--async-finished))
+      ((and (< init/org-sync--push-attempt init/org-sync-push-retries)
+            (init/org-sync--push-rejected-p output))
+       (cl-incf init/org-sync--push-attempt)
+       (init/org-sync--async-fetch))
+      (t
+       (setq init/org-sync--push-attempt 0)
        (init/org-sync--async-finished
-        (if (string-empty-p output) "push failed" output))))))
+        (if (string-empty-p output) "push failed" output)))))))
 
 (defun init/org-sync--run-deferred ()
   "Commit pending Org changes and begin asynchronous network synchronization."
@@ -273,10 +443,20 @@ Return a cons of exit status and trimmed combined output."
            (process-live-p init/org-sync--process))
       (setq init/org-sync--pending t)
     (condition-case err
-        (progn
+        (if (not (init/org-sync--sync-needed-p))
+            ;; Nothing to send and the remote was checked recently: stay off
+            ;; the network entirely and remain silent.
+            (when init/org-sync--pending
+              (setq init/org-sync--pending nil)
+              (init/org-sync--schedule))
           (init/org-sync--ensure-no-conflict)
           (init/org-sync--commit-local-changes)
-          (init/org-sync--async-fetch))
+          (if (or (> (init/org-sync--ahead-count) 0)
+                  (init/org-sync--fetch-due-p))
+              (init/org-sync--async-fetch)
+            (when init/org-sync--pending
+              (setq init/org-sync--pending nil)
+              (init/org-sync--schedule))))
       (error
        (init/org-sync--async-finished (error-message-string err))))))
 

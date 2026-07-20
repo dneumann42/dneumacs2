@@ -575,6 +575,26 @@ different date instead of using today."
             #'init/org-add-cookie-to-todo-parent)
   (add-hook 'org-after-todo-statistics-hook #'org-summary-todo))
 
+;;;; Open a file in the org folder
+(defun init/org-find-file ()
+  "Find a org file"
+  (interactive)
+  (unless (and (boundp 'org-directory)
+	       org-directory
+	       (file-directory-p org-directory))
+    (user-error "`org-directory' is not configured"))
+  (let* ((root (file-name-as-directory
+		(expand-file-name org-directory)))
+	 (files (directory-files-recursively
+		 root "\\.org\\(?:\\.gpg\\)?\\'"))
+	 (relative-files
+	  (mapcar (lambda (f)
+		    (file-relative-name f root))
+		  files))
+	 (selection
+	  (completing-read "Org file: " relative-files nil t)))
+    (find-file (expand-file-name selection root))))
+
 ;;;; Agenda menu
 
 (defun init/org-capture-todo ()

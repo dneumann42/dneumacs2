@@ -311,7 +311,8 @@ The project and session tools live in the document toolbar (⚒)."
    (init/modeline-button "☰" "Toggle menu bar" #'init/toggle-menu-bar)
    (init/modeline-button "⚒" "Toggle toolbar" #'init/doc-toolbar-mode)
    (init/modeline-button "◧" "Toggle Treemacs" #'treemacs)
-   (init/modeline-button "✎" "Org capture" #'org-capture)))
+   (init/modeline-button "✎" "Org capture" #'org-capture)
+   (init/modeline-button "⌕" "Org find file" #'init/org-find-file)))
 
 ;;;; Misc editor commands and helpers
 
@@ -532,22 +533,6 @@ under lisp/ from `features' first makes those requires re-load in order."
   (add-to-list 'global-colorful-modes 'helpful-mode))
 
 ;;;; Run/build panel
-
-;; The *compilation* buffer -- plain `compile', nim run, and the
-;; per-project run/build commands -- is shown in a dedicated panel that
-;; can take one of two shapes, switchable at any time with
-;; `init/compilation-toggle-floating' (or the panel toolbar's ⧉ button):
-;;
-;;   floating  a child frame at the top-right of the editing frame
-;;   embedded  a bottom window split into the editing frame
-;;
-;; Output follows the tail as it arrives, but leaves point alone once you
-;; scroll up -- both compilation-mode and comint set
-;; `window-point-insertion-type', so a window sitting at the end tracks new
-;; output while a scrolled-up window stays put; `compilation-scroll-output'
-;; starts plain compilations at the bottom.  The panel is resizable from
-;; the toolbar (⤢ / ⤡), and a floating panel can also be resized by
-;; dragging its border.
 
 (defconst init/compilation-buffer-name "*compilation*"
   "Name of the run/build panel buffer.")
