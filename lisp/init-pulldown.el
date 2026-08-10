@@ -1,4 +1,4 @@
-;;; pulldown-menu.el --- Themed buffer-based pulldown menus -*- lexical-binding: t; -*-
+;;; init-pulldown.el --- Themed buffer-based pulldown menus -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
@@ -19,12 +19,12 @@
 ;; Interaction (mouse-driven, keyboard-focused):
 ;;   up / down / C-p / C-n   move between items (separators are skipped)
 ;;   right / C-f             open the submenu under the cursor
-;;   left / C-b             close the current submenu
-;;   RET / SPC              run the item, or open its submenu
-;;   a printable character  jump to the next item whose label starts with it
-;;   ESC / C-g             cancel
-;;   mouse hover            highlight the row, open submenus automatically
-;;   mouse click            run the item; a click outside the menu cancels
+;;   left / C-b              close the current submenu
+;;   RET / SPC               run the item, or open its submenu
+;;   a printable character   jump to the next item whose label starts with it
+;;   ESC / C-g               cancel
+;;   mouse hover             highlight the row, open submenus automatically
+;;   mouse click             run the item; a click outside the menu cancels
 ;;
 ;; On a non-graphical frame (no child frames) it falls back to the
 ;; built-in text menu, `tmm-prompt'.
@@ -91,12 +91,13 @@ Higher values make the divider fainter."
 ;;;; A single open menu level
 
 (cl-defstruct (pulldown-menu--level (:constructor pulldown-menu--level-make))
-  buffer       ; the buffer displayed in this level's child frame
-  frame        ; the posframe child frame
-  items        ; list of parsed item plists, one per line
-  selection    ; index into ITEMS of the current row, or nil
-  overlay      ; overlay drawing the selection highlight
-  depth        ; 0 for the root menu, +1 per nested submenu
+  "One open level of the menu tree, displayed in its own child frame."
+  buffer         ; the buffer displayed in this level's child frame
+  frame          ; the posframe child frame
+  items          ; list of parsed item plists, one per line
+  selection      ; index into ITEMS of the current row, or nil
+  overlay        ; overlay drawing the selection highlight
+  depth          ; 0 for the root menu, +1 per nested submenu
   parent-index)  ; index in the parent level this submenu was opened from
 
 ;; Dynamic state of the modal loop, bound in `pulldown-menu--run'.
@@ -159,15 +160,17 @@ and key hints sometimes are), or a form to evaluate."
    ((stringp value) value)
    ((null value) nil)
    ((and (functionp value) (not (symbolp value)))
-    (let ((r (ignore-errors (funcall value)))) (and (stringp r) r)))
+    (let ((result (ignore-errors (funcall value))))
+      (and (stringp result) result)))
    ((symbolp value) nil)
-   (t (let ((r (pulldown-menu--eval value))) (and (stringp r) r)))))
+   (t (let ((result (pulldown-menu--eval value)))
+        (and (stringp result) result)))))
 
 (defun pulldown-menu--coerce-keys (value)
   "Coerce a menu-item :keys VALUE to a substituted key-hint string, or nil."
-  (let ((s (pulldown-menu--coerce-string value)))
-    (when (and s (> (length s) 0))
-      (or (ignore-errors (substitute-command-keys s)) s))))
+  (let ((hint (pulldown-menu--coerce-string value)))
+    (when (and hint (> (length hint) 0))
+      (or (ignore-errors (substitute-command-keys hint)) hint))))
 
 (defun pulldown-menu--parse-menu-item (def)
   "Parse a `menu-item' form DEF into an item plist, or nil."
@@ -223,8 +226,8 @@ and key hints sometimes are), or a form to evaluate."
        (plist-get item :enabled)
        (pcase (plist-get item :type)
          ('submenu t)
-         ('item (let ((c (plist-get item :command)))
-                  (or (commandp c) (keymapp c))))
+         ('item (let ((command (plist-get item :command)))
+                  (or (commandp command) (keymapp command))))
          (_ nil))))
 
 (defun pulldown-menu--first-selectable (items)
@@ -258,6 +261,29 @@ and key hints sometimes are), or a form to evaluate."
                          (plist-get item :label))
                  (or (plist-get item :keys) "")))))
 
+(defun pulldown-menu--color (face attribute fallback)
+  "Return FACE's ATTRIBUTE color as a string, or FALLBACK's when unset."
+  (let ((color (face-attribute face attribute nil t)))
+    (if (stringp color) color (face-attribute fallback attribute nil t))))
+
+(defun pulldown-menu--divider-color ()
+  "Return a faint separator color blended toward the menu background."
+  (require 'color)
+  (let ((background (color-name-to-rgb
+                     (pulldown-menu--color 'pulldown-menu-default
+                                           :background 'default)))
+        (foreground (color-name-to-rgb
+                     (pulldown-menu--color 'pulldown-menu-separator
+                                           :foreground 'shadow)))
+        (weight (max 0.0 (min 1.0 pulldown-menu-separator-blend))))
+    (if (and background foreground)
+        (apply #'color-rgb-to-hex
+               (append (cl-mapcar (lambda (b f)
+                                    (+ (* weight b) (* (- 1.0 weight) f)))
+                                  background foreground)
+                       '(2)))
+      (pulldown-menu--color 'pulldown-menu-separator :foreground 'shadow))))
+
 (defun pulldown-menu--format-line (item left right width)
   "Return the WIDTH-column rendered line for ITEM from LEFT and RIGHT."
   (pcase (plist-get item :type)
@@ -269,51 +295,28 @@ and key hints sometimes are), or a form to evaluate."
                  'face (list :overline (pulldown-menu--divider-color))))
     (_
      (let* ((enabled (plist-get item :enabled))
-            (lface (if enabled 'pulldown-menu-default 'pulldown-menu-disabled))
-            (rface (if (eq (plist-get item :type) 'submenu)
-                       'pulldown-menu-arrow 'pulldown-menu-key))
-            (pad (max 1 (- width 2 (string-width left) (string-width right)))))
+            (left-face (if enabled 'pulldown-menu-default 'pulldown-menu-disabled))
+            (right-face (if (eq (plist-get item :type) 'submenu)
+                            'pulldown-menu-arrow 'pulldown-menu-key))
+            (padding (max 1 (- width 2 (string-width left) (string-width right)))))
        (concat " "
-               (propertize left 'face lface)
-               (make-string pad ?\s)
-               (propertize right 'face rface)
+               (propertize left 'face left-face)
+               (make-string padding ?\s)
+               (propertize right 'face right-face)
                " ")))))
 
-(defun pulldown-menu--color (face attr fallback)
-  "Return FACE's ATTR color as a string, or FALLBACK's when unset."
-  (let ((c (face-attribute face attr nil t)))
-    (if (stringp c) c (face-attribute fallback attr nil t))))
-
-(defun pulldown-menu--divider-color ()
-  "Return a faint separator color blended toward the menu background."
-  (require 'color)
-  (let ((bg (color-name-to-rgb
-             (pulldown-menu--color 'pulldown-menu-default :background 'default)))
-        (fg (color-name-to-rgb
-             (pulldown-menu--color 'pulldown-menu-separator :foreground 'shadow)))
-        (w (max 0.0 (min 1.0 pulldown-menu-separator-blend))))
-    (if (and bg fg)
-        (apply #'color-rgb-to-hex
-               (append (cl-mapcar (lambda (b f) (+ (* w b) (* (- 1.0 w) f))) bg fg)
-                       '(2)))
-      (pulldown-menu--color 'pulldown-menu-separator :foreground 'shadow))))
-
-(defun pulldown-menu--show (buf x y width nlines)
-  "Show BUF in a child frame at frame-relative pixel X, Y.
-WIDTH is in columns and NLINES the number of rows; both clamp the
-frame onto the parent.  Return the child frame."
+(defun pulldown-menu--show (buffer x y width lines)
+  "Show BUFFER in a child frame at frame-relative pixel X, Y.
+WIDTH is in columns and LINES the number of rows; both clamp the frame
+onto the parent.  Return the child frame."
   (let* ((frame (selected-frame))
-         (cw (frame-char-width frame))
-         (chh (frame-char-height frame))
-         (pw (frame-pixel-width frame))
-         (ph (frame-pixel-height frame))
-         (px-w (+ (* width cw) 4))
-         (px-h (+ (* nlines chh) 4))
-         (x2 (max 0 (min x (max 0 (- pw px-w)))))
-         (y2 (max 0 (min y (max 0 (- ph px-h))))))
+         (pixel-width (+ (* width (frame-char-width frame)) 4))
+         (pixel-height (+ (* lines (frame-char-height frame)) 4))
+         (left (max 0 (min x (max 0 (- (frame-pixel-width frame) pixel-width)))))
+         (top (max 0 (min y (max 0 (- (frame-pixel-height frame) pixel-height))))))
     (posframe-show
-     buf
-     :position (cons x2 y2)
+     buffer
+     :position (cons left top)
      :internal-border-width 1
      :internal-border-color (pulldown-menu--color 'pulldown-menu-border
                                                   :foreground 'shadow)
@@ -327,51 +330,61 @@ frame onto the parent.  Return the child frame."
 
 (defun pulldown-menu--draw-selection (level)
   "Move LEVEL's selection overlay onto its current row."
-  (let ((buf (pulldown-menu--level-buffer level))
-        (idx (pulldown-menu--level-selection level))
-        (ov (pulldown-menu--level-overlay level)))
-    (when (and idx (buffer-live-p buf) (overlayp ov))
-      (with-current-buffer buf
+  (let ((buffer (pulldown-menu--level-buffer level))
+        (index (pulldown-menu--level-selection level))
+        (overlay (pulldown-menu--level-overlay level)))
+    (when (and index (buffer-live-p buffer) (overlayp overlay))
+      (with-current-buffer buffer
         (goto-char (point-min))
-        (forward-line idx)
-        (move-overlay ov (line-beginning-position)
+        (forward-line index)
+        (move-overlay overlay (line-beginning-position)
                       (min (point-max) (1+ (line-end-position)))
-                      buf)))))
+                      buffer)))))
+
+(defun pulldown-menu--line-width (cells)
+  "Return the rendered menu width in columns for item CELLS."
+  (let ((left (apply #'max 1 (mapcar (lambda (cell) (string-width (car cell)))
+                                     cells)))
+        (right (apply #'max 0 (mapcar (lambda (cell) (string-width (cdr cell)))
+                                      cells))))
+    (max pulldown-menu-min-width
+         (+ 2 left (if (> right 0) 3 0) right))))
+
+(defun pulldown-menu--insert-items (items cells width)
+  "Insert ITEMS, rendered from CELLS at WIDTH columns, into the buffer."
+  (let ((last (1- (length items))))
+    (cl-loop for item in items
+             for cell in cells
+             for index from 0
+             do (insert (pulldown-menu--format-line
+                         item (car cell) (cdr cell) width))
+             (when (< index last)
+               ;; The newline that ends a row carries its `line-height';
+               ;; trim separator rows so the divider stays thin.
+               (insert (if (eq (plist-get item :type) 'separator)
+                           (propertize "\n" 'line-height
+                                       pulldown-menu-separator-height)
+                         "\n"))))))
 
 (defun pulldown-menu--open (items x y depth parent-index)
   "Render ITEMS in a child frame at X, Y and return a level struct.
 DEPTH and PARENT-INDEX identify the level within the open menu tree."
-  (let* ((buf (get-buffer-create (format " *pulldown-menu-%d*" depth)))
+  (let* ((buffer (get-buffer-create (format " *pulldown-menu-%d*" depth)))
          (cells (mapcar #'pulldown-menu--item-cells items))
-         (lw (apply #'max 1 (mapcar (lambda (c) (string-width (car c))) cells)))
-         (rw (apply #'max 0 (mapcar (lambda (c) (string-width (cdr c))) cells)))
-         (gap (if (> rw 0) 3 0))
-         (width (max pulldown-menu-min-width (+ 2 lw gap rw)))
+         (width (pulldown-menu--line-width cells))
          overlay)
-    (with-current-buffer buf
+    (with-current-buffer buffer
       (pulldown-menu--setup-buffer)
-      (let ((inhibit-read-only t)
-            (n (length items)))
+      (let ((inhibit-read-only t))
         (erase-buffer)
-        (cl-loop for item in items
-                 for cell in cells
-                 for i from 0
-                 do (insert (pulldown-menu--format-line
-                             item (car cell) (cdr cell) width))
-                 (when (< i (1- n))
-                   ;; The newline that ends a row carries its `line-height';
-                   ;; trim separator rows so the divider stays thin.
-                   (insert (if (eq (plist-get item :type) 'separator)
-                               (propertize "\n" 'line-height
-                                           pulldown-menu-separator-height)
-                             "\n"))))
+        (pulldown-menu--insert-items items cells width)
         (goto-char (point-min)))
       (setq overlay (make-overlay (point-min) (point-min)))
       (overlay-put overlay 'face 'pulldown-menu-selection)
       (overlay-put overlay 'priority 100))
     (let ((level (pulldown-menu--level-make
-                  :buffer buf
-                  :frame (pulldown-menu--show buf x y width (length items))
+                  :buffer buffer
+                  :frame (pulldown-menu--show buffer x y width (length items))
                   :items items
                   :selection (pulldown-menu--first-selectable items)
                   :overlay overlay
@@ -383,17 +396,17 @@ DEPTH and PARENT-INDEX identify the level within the open menu tree."
 (defun pulldown-menu--close (level)
   "Hide LEVEL's child frame and drop its selection overlay."
   (when level
-    (let ((buf (pulldown-menu--level-buffer level))
-          (ov (pulldown-menu--level-overlay level)))
-      (when (overlayp ov) (delete-overlay ov))
-      (when (buffer-live-p buf) (ignore-errors (posframe-hide buf))))))
+    (let ((buffer (pulldown-menu--level-buffer level))
+          (overlay (pulldown-menu--level-overlay level)))
+      (when (overlayp overlay) (delete-overlay overlay))
+      (when (buffer-live-p buffer) (ignore-errors (posframe-hide buffer))))))
 
-;;;; Navigation helpers operating on the open stack
+;;;; Navigation over the open stack
 
 (defun pulldown-menu--current-item (level)
   "Return the currently selected item of LEVEL, or nil."
-  (let ((sel (pulldown-menu--level-selection level)))
-    (when sel (nth sel (pulldown-menu--level-items level)))))
+  (when-let ((selection (pulldown-menu--level-selection level)))
+    (nth selection (pulldown-menu--level-items level))))
 
 (defun pulldown-menu--child-of (level)
   "Return the open child level of LEVEL, or nil."
@@ -402,9 +415,9 @@ DEPTH and PARENT-INDEX identify the level within the open menu tree."
 
 (defun pulldown-menu--close-deeper-than (level)
   "Close every open level nested below LEVEL."
-  (let ((d (pulldown-menu--level-depth level)))
+  (let ((depth (pulldown-menu--level-depth level)))
     (while (and pulldown-menu--stack
-                (> (pulldown-menu--level-depth (car pulldown-menu--stack)) d))
+                (> (pulldown-menu--level-depth (car pulldown-menu--stack)) depth))
       (pulldown-menu--close (pop pulldown-menu--stack)))))
 
 (defun pulldown-menu--collapse-one ()
@@ -412,46 +425,50 @@ DEPTH and PARENT-INDEX identify the level within the open menu tree."
   (when (cdr pulldown-menu--stack)
     (pulldown-menu--close (pop pulldown-menu--stack))))
 
-(defun pulldown-menu--move (level dir)
-  "Move LEVEL's selection by DIR (+1 or -1) to the next selectable row."
-  (let* ((items (pulldown-menu--level-items level))
-         (n (length items))
-         (i (or (pulldown-menu--level-selection level) 0)))
-    (when (> n 0)
-      (cl-loop repeat n
-               do (setq i (mod (+ i dir) n))
-               when (pulldown-menu--selectable-p (nth i items))
-               return (progn
-                        (setf (pulldown-menu--level-selection level) i)
-                        (pulldown-menu--draw-selection level))))))
+(defun pulldown-menu--select-at (level index)
+  "Select row INDEX in LEVEL and redraw its highlight."
+  (setf (pulldown-menu--level-selection level) index)
+  (pulldown-menu--draw-selection level))
 
-(defun pulldown-menu--type-ahead (level ch)
-  "Select the next item in LEVEL whose label starts with character CH."
+(defun pulldown-menu--move (level direction)
+  "Move LEVEL's selection by DIRECTION (+1 or -1) to the next selectable row."
   (let* ((items (pulldown-menu--level-items level))
-         (n (length items))
+         (count (length items))
+         (index (or (pulldown-menu--level-selection level) 0)))
+    (when (> count 0)
+      (cl-loop repeat count
+               do (setq index (mod (+ index direction) count))
+               when (pulldown-menu--selectable-p (nth index items))
+               return (pulldown-menu--select-at level index)))))
+
+(defun pulldown-menu--type-ahead (level character)
+  "Select the next item in LEVEL whose label starts with CHARACTER."
+  (let* ((items (pulldown-menu--level-items level))
+         (count (length items))
          (start (or (pulldown-menu--level-selection level) -1))
-         (down (downcase ch)))
-    (cl-loop for k from 1 to n
-             for i = (mod (+ start k) n)
-             for item = (nth i items)
+         (wanted (downcase character)))
+    (cl-loop for step from 1 to count
+             for index = (mod (+ start step) count)
+             for item = (nth index items)
              when (and (pulldown-menu--selectable-p item)
-                       (let ((lbl (plist-get item :label)))
-                         (and (> (length lbl) 0)
-                              (eql (downcase (aref lbl 0)) down))))
-             return (progn
-                      (setf (pulldown-menu--level-selection level) i)
-                      (pulldown-menu--draw-selection level)))))
+                       (let ((label (plist-get item :label)))
+                         (and (> (length label) 0)
+                              (eql (downcase (aref label 0)) wanted))))
+             return (pulldown-menu--select-at level index))))
 
 (defun pulldown-menu--submenu-position (level)
   "Return frame-relative (X . Y) for a submenu opened from LEVEL."
-  (let* ((parent (selected-frame))
-         (cframe (pulldown-menu--level-frame level)))
-    (pcase-let ((`(,pl ,pt ,_pr ,_pb) (frame-edges parent 'native-edges))
-                (`(,_cl ,ct ,cr ,_cb) (frame-edges cframe 'native-edges)))
-      (let ((sel (or (pulldown-menu--level-selection level) 0))
-            (chh (frame-char-height cframe)))
-        (cons (max 0 (- cr pl 3))
-              (max 0 (+ (- ct pt) (* sel chh) 1)))))))
+  (let ((parent (selected-frame))
+        (child (pulldown-menu--level-frame level)))
+    (pcase-let ((`(,parent-left ,parent-top ,_r ,_b)
+                 (frame-edges parent 'native-edges))
+                (`(,_l ,child-top ,child-right ,_cb)
+                 (frame-edges child 'native-edges)))
+      (let ((selection (or (pulldown-menu--level-selection level) 0))
+            (line-height (frame-char-height child)))
+        (cons (max 0 (- child-right parent-left 3))
+              (max 0 (+ (- child-top parent-top)
+                        (* selection line-height) 1)))))))
 
 (defun pulldown-menu--open-submenu-of (level)
   "Open the submenu selected in LEVEL, if any, pushing it on the stack."
@@ -462,24 +479,28 @@ DEPTH and PARENT-INDEX identify the level within the open menu tree."
         (unless (and child (eql (pulldown-menu--level-parent-index child)
                                 (pulldown-menu--level-selection level)))
           (pulldown-menu--close-deeper-than level)
-          (let ((subitems (pulldown-menu--parse (plist-get item :keymap))))
-            (when (cl-some #'pulldown-menu--selectable-p subitems)
-              (pcase-let ((`(,sx . ,sy) (pulldown-menu--submenu-position level)))
+          (let ((items (pulldown-menu--parse (plist-get item :keymap))))
+            (when (cl-some #'pulldown-menu--selectable-p items)
+              (pcase-let ((`(,x . ,y) (pulldown-menu--submenu-position level)))
                 (push (pulldown-menu--open
-                       subitems sx sy
+                       items x y
                        (1+ (pulldown-menu--level-depth level))
                        (pulldown-menu--level-selection level))
                       pulldown-menu--stack)))))))))
 
+(defun pulldown-menu--choose (item)
+  "Finish the modal loop by choosing ITEM's command."
+  (setq pulldown-menu--result (plist-get item :command)
+        pulldown-menu--done t))
+
 (defun pulldown-menu--activate ()
-  "Act on the current item of the deepest level."
+  "Act on the current item of the deepest open level."
   (let* ((level (car pulldown-menu--stack))
          (item (pulldown-menu--current-item level)))
     (when (and item (plist-get item :enabled))
       (pcase (plist-get item :type)
         ('submenu (pulldown-menu--open-submenu-of level))
-        ('item (setq pulldown-menu--result (plist-get item :command)
-                     pulldown-menu--done t))))))
+        ('item (pulldown-menu--choose item))))))
 
 ;;;; Event handling
 
@@ -496,59 +517,57 @@ DEPTH and PARENT-INDEX identify the level within the open menu tree."
 
 (defun pulldown-menu--event->hit (event)
   "Return (LEVEL . INDEX) for the menu row under EVENT, or nil."
-  (let* ((posn (event-start event))
-         (win (posn-window posn)))
-    (when (windowp win)
-      (let* ((buf (window-buffer win))
-             (level (cl-find buf pulldown-menu--stack
+  (let* ((position (event-start event))
+         (window (posn-window position)))
+    (when (windowp window)
+      (let* ((buffer (window-buffer window))
+             (level (cl-find buffer pulldown-menu--stack
                              :key #'pulldown-menu--level-buffer)))
         (when level
-          (let* ((pt (posn-point posn))
-                 (row (cdr (posn-col-row posn)))
-                 (idx (cond
-                       ((integerp pt)
-                        (with-current-buffer buf (1- (line-number-at-pos pt))))
-                       ((integerp row) row))))
-            (when (and idx (>= idx 0)
-                       (< idx (length (pulldown-menu--level-items level))))
-              (cons level idx))))))))
+          (let* ((point (posn-point position))
+                 (row (cdr (posn-col-row position)))
+                 (index (cond
+                         ((integerp point)
+                          (with-current-buffer buffer
+                            (1- (line-number-at-pos point))))
+                         ((integerp row) row))))
+            (when (and index (>= index 0)
+                       (< index (length (pulldown-menu--level-items level))))
+              (cons level index))))))))
 
-(defun pulldown-menu--select-at (level idx)
-  "Select row IDX in LEVEL and redraw its highlight."
-  (setf (pulldown-menu--level-selection level) idx)
-  (pulldown-menu--draw-selection level))
+(defun pulldown-menu--hover-settled-p (level index item)
+  "Return non-nil when hovering row INDEX of LEVEL needs no redraw.
+ITEM is the item on that row: it is settled when the row is already
+selected and its submenu state already matches."
+  (and (eql (pulldown-menu--level-selection level) index)
+       (let ((child (pulldown-menu--child-of level)))
+         (if (eq (plist-get item :type) 'submenu)
+             (and child (eql (pulldown-menu--level-parent-index child) index))
+           (null child)))))
 
 (defun pulldown-menu--hover (event)
   "Handle a mouse-movement EVENT: highlight and open submenus on hover."
-  (let ((hit (pulldown-menu--event->hit event)))
-    (when hit
-      (pcase-let ((`(,level . ,idx) hit))
-        (let ((item (nth idx (pulldown-menu--level-items level))))
-          (when (pulldown-menu--selectable-p item)
-            (unless (and (eql (pulldown-menu--level-selection level) idx)
-                         (let ((child (pulldown-menu--child-of level)))
-                           (if (eq (plist-get item :type) 'submenu)
-                               (and child (eql (pulldown-menu--level-parent-index child)
-                                               idx))
-                             (null child))))
-              (pulldown-menu--close-deeper-than level)
-              (pulldown-menu--select-at level idx)
-              (when (eq (plist-get item :type) 'submenu)
-                (pulldown-menu--open-submenu-of level)))))))))
+  (when-let ((hit (pulldown-menu--event->hit event)))
+    (pcase-let ((`(,level . ,index) hit))
+      (let ((item (nth index (pulldown-menu--level-items level))))
+        (when (and (pulldown-menu--selectable-p item)
+                   (not (pulldown-menu--hover-settled-p level index item)))
+          (pulldown-menu--close-deeper-than level)
+          (pulldown-menu--select-at level index)
+          (when (eq (plist-get item :type) 'submenu)
+            (pulldown-menu--open-submenu-of level)))))))
 
 (defun pulldown-menu--click (event)
   "Handle a mouse click EVENT: activate the row under it."
-  (let ((hit (pulldown-menu--event->hit event)))
-    (when hit
-      (pcase-let ((`(,level . ,idx) hit))
-        (let ((item (nth idx (pulldown-menu--level-items level))))
-          (when (pulldown-menu--selectable-p item)
-            (pulldown-menu--close-deeper-than level)
-            (pulldown-menu--select-at level idx)
-            (pcase (plist-get item :type)
-              ('submenu (pulldown-menu--open-submenu-of level))
-              ('item (setq pulldown-menu--result (plist-get item :command)
-                           pulldown-menu--done t)))))))))
+  (when-let ((hit (pulldown-menu--event->hit event)))
+    (pcase-let ((`(,level . ,index) hit))
+      (let ((item (nth index (pulldown-menu--level-items level))))
+        (when (pulldown-menu--selectable-p item)
+          (pulldown-menu--close-deeper-than level)
+          (pulldown-menu--select-at level index)
+          (pcase (plist-get item :type)
+            ('submenu (pulldown-menu--open-submenu-of level))
+            ('item (pulldown-menu--choose item))))))))
 
 (defun pulldown-menu--handle-mouse (event)
   "Dispatch a mouse EVENT to hover, wheel, click or cancel handling."
@@ -576,7 +595,8 @@ DEPTH and PARENT-INDEX identify the level within the open menu tree."
       ('left     (pulldown-menu--collapse-one))
       ('activate (pulldown-menu--activate))
       ('cancel   (setq pulldown-menu--done t))
-      (`(char . ,c) (pulldown-menu--type-ahead (car pulldown-menu--stack) c))))))
+      (`(char . ,character)
+       (pulldown-menu--type-ahead (car pulldown-menu--stack) character))))))
 
 (defun pulldown-menu--run (items x y)
   "Run the modal menu loop for root ITEMS shown at X, Y.
@@ -597,30 +617,44 @@ Return the command the user chose, or nil."
       (message nil))
     pulldown-menu--result))
 
-;;;; Entry point
+;;;; Entry points
+
+(defun pulldown-menu--mouse-position (frame)
+  "Return frame-relative (X . Y) just below the mouse pointer in FRAME."
+  (pcase-let ((`(,frame-left ,frame-top ,_r ,_b)
+               (frame-edges frame 'native-edges))
+              (`(,mouse-x . ,mouse-y) (mouse-absolute-pixel-position)))
+    (let ((line-height (frame-char-height frame))
+          (relative-y (max 0 (- mouse-y frame-top))))
+      ;; Anchor to the bottom of the row the pointer is in, so the menu
+      ;; sits just under the clicked line or bar wherever within that row
+      ;; the click landed; adding a full line overshoots by up to a line.
+      (cons (max 0 (- mouse-x frame-left))
+            (* (1+ (/ relative-y line-height)) line-height)))))
+
+(defun pulldown-menu--point-position (frame)
+  "Return frame-relative (X . Y) just below point in FRAME."
+  (if-let ((position (posn-at-point)))
+      (pcase-let ((`(,x . ,y) (posn-x-y position))
+                  (`(,left ,top ,_r ,_b) (window-inside-pixel-edges)))
+        (cons (+ x left) (+ y top (frame-char-height frame))))
+    (cons 8 (frame-char-height frame))))
 
 (defun pulldown-menu--trigger-position (trigger)
   "Return frame-relative (X . Y) pixels at which to open the menu.
 TRIGGER is the mouse event that requested the menu, or nil.  Without a
 mouse event, open near point; failing that, near the top-left corner."
   (let ((frame (selected-frame)))
-    (pcase-let ((`(,fl ,ft ,_r ,_b) (frame-edges frame 'native-edges)))
-      (cond
-       ((and trigger (mouse-event-p trigger))
-        (pcase-let ((`(,mx . ,my) (mouse-absolute-pixel-position)))
-          (let* ((chh (frame-char-height frame))
-                 (y0 (max 0 (- my ft))))
-            ;; Anchor to the bottom of the row the pointer is in, so the
-            ;; menu sits just under the clicked line or bar regardless of
-            ;; where within that row the click landed (adding a full line
-            ;; to the raw pointer overshoots by up to a line).
-            (cons (max 0 (- mx fl))
-                  (* (1+ (/ y0 chh)) chh)))))
-       ((posn-at-point)
-        (pcase-let ((`(,px . ,py) (posn-x-y (posn-at-point)))
-                    (`(,wl ,wt ,_wr ,_wb) (window-inside-pixel-edges)))
-          (cons (+ px wl) (+ py wt (frame-char-height frame)))))
-       (t (cons 8 (frame-char-height frame)))))))
+    (if (and trigger (mouse-event-p trigger))
+        (pulldown-menu--mouse-position frame)
+      (pulldown-menu--point-position frame))))
+
+(defun pulldown-menu--call (command)
+  "Run COMMAND as if the user had invoked it from a menu."
+  (when (commandp command)
+    (setq this-command command)
+    (let ((last-nonmenu-event t))
+      (call-interactively command))))
 
 ;;;###autoload
 (defun pulldown-menu-popup (menu &optional trigger)
@@ -631,28 +665,22 @@ given, is the mouse event that requested the menu and positions it.
 Falls back to `tmm-prompt' on a non-graphical frame."
   (let ((keymap (if (keymapp menu) menu (easy-menu-create-menu nil menu))))
     (if (not (and (display-graphic-p) (require 'posframe nil t)))
-        (let ((cmd (tmm-prompt keymap)))
-          (when (commandp cmd)
-            (let ((last-nonmenu-event t)) (call-interactively cmd))))
+        (pulldown-menu--call (tmm-prompt keymap))
       (let ((items (pulldown-menu--parse keymap)))
         (if (not (cl-some #'pulldown-menu--selectable-p items))
             (message "(Empty menu)")
           (pcase-let ((`(,x . ,y) (pulldown-menu--trigger-position trigger)))
-            (let ((command (pulldown-menu--run items x y)))
-              (when (commandp command)
-                (setq this-command command)
-                (let ((last-nonmenu-event t))
-                  (call-interactively command))))))))))
+            (pulldown-menu--call (pulldown-menu--run items x y))))))))
 
 ;;;; Context-menu integration
 
 (declare-function context-menu-map "mouse")
 
 (defun pulldown-menu--popup-context (menu trigger)
-  "Show context MENU via the pulldown, or run it if it is a command.
+  "Show context MENU via the pulldown, or run it when it is a command.
 TRIGGER is the event that requested it, or nil."
   (if (commandp menu)
-      (let ((last-nonmenu-event t)) (call-interactively menu))
+      (pulldown-menu--call menu)
     (pulldown-menu-popup menu trigger)))
 
 ;;;###autoload
@@ -674,5 +702,5 @@ such as \\[context-menu-open])."
   (require 'mouse)
   (pulldown-menu--popup-context (context-menu-map) nil))
 
-(provide 'pulldown-menu)
-;;; pulldown-menu.el ends here
+(provide 'init-pulldown)
+;;; init-pulldown.el ends here

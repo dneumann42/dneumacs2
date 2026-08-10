@@ -1,70 +1,151 @@
-;;; init-org.el --- Org mode configuration -*- lexical-binding: t; -*-
+;;; init-org.el --- Org mode -*- lexical-binding: t; -*-
 
-(require 'font-tools)
-(require 'org-sync)
+;;; Commentary:
+
+;; Org configured as a place to write rather than a place to program:
+;; prose is set in the writer font at a comfortable measure, while code
+;; blocks, tables and metadata stay monospaced so they still line up.
+;;
+;; On top of the usual capture and agenda setup there are four additions:
+;;
+;;   * a daily journal that is edited rather than captured, so each day
+;;     has exactly one entry (`init/org-goto-journal');
+;;   * automatic `[/]' statistics cookies on TODO parents, added the
+;;     moment a child TODO appears beneath one;
+;;   * local `<<target>>' references that behave like code: M-. jumps
+;;     through the xref stack, and hovering or C-c C-. shows the target
+;;     in a popup without leaving the line;
+;;   * headline tags drawn as rounded pills, floated flush to the right
+;;     window edge.
+;;
+;; Org itself is deferred: the `use-package' block below autoloads it on
+;; the first Org buffer, agenda or capture, so everything at top level
+;; here has to work without Org loaded.
+
+;;; Code:
+
+(require 'seq)
 (require 'subr-x)
+(require 'init-lib)
+(require 'init-org-sync)
+(require 'init-theme)
 
 (declare-function calendar-current-date "calendar")
 (declare-function org-at-heading-p "org")
 (declare-function org-datetree-find-date-create "org-datetree")
 (declare-function org-edit-headline "org")
+(declare-function org-element-context "org-element")
+(declare-function org-element-property "org-element-ast")
+(declare-function org-element-type "org-element-ast")
 (declare-function org-end-of-subtree "org")
 (declare-function org-fold-show-entry "org-fold")
 (declare-function org-get-heading "org")
 (declare-function org-get-todo-state "org")
+(declare-function org-link-search "ol")
+(declare-function org-narrow-to-subtree "org")
+(declare-function org-open-at-point "org")
 (declare-function org-read-date "org")
 (declare-function org-todo "org")
 (declare-function org-up-heading-safe "org")
 (declare-function org-update-statistics-cookies "org")
+(defvar org-babel-load-languages)
 (defvar org-directory)
 (defvar org-log-done)
+(defvar org-mode-map)
 (defvar org-todo-log-states)
 
-;; Org itself is deferred: the use-package block below autoloads it on
-;; the first Org buffer, agenda, or capture.  Everything at top level
-;; here must work without Org loaded.
+;;;; Prose typography
 
-;;;; Writerly font (EB Garamond), applied only in Org buffers
+(defconst init/org-writer-font-height 1.3
+  "Relative height of Org prose in the writer font.")
 
-;; Installs like the Cascadia flow in editor.el: probe for the family,
-;; offer to download it into ~/.local/share/fonts on first use.
-;; EB Garamond (SIL OFL) is a revival of Claude Garamont's 16th-century
-;; types -- an elegant, bookish serif that makes Org read like a page.
+(defconst init/org-fixed-pitch-font-height 1.0
+  "Relative height of fixed-pitch regions in Org buffers.")
 
-(defconst init/org-writer-font-family "EB Garamond"
-  "Preferred writer font family for Org buffers.")
+(defvar-local init/org--writer-font-remap nil
+  "Face-remap cookie for the writer font in the current Org buffer.")
 
-(defconst init/org-writer-font-families
-  '("EB Garamond" "EBGaramond")
-  "Family names to probe for an installed EB Garamond font.")
+(defvar-local init/org--fixed-pitch-font-remap nil
+  "Face-remap cookie for scaled fixed-pitch regions in Org buffers.")
 
-(defconst init/org-writer-font-files
-  (let ((base "https://raw.githubusercontent.com/octaviopardo/EBGaramond12/master/fonts/ttf/"))
-    (mapcar (lambda (file) (cons file (concat base file)))
-            ;; SemiBold included: the Org heading faces use semi-bold.
-            '("EBGaramond-Regular.ttf"
-              "EBGaramond-Italic.ttf"
-              "EBGaramond-Bold.ttf"
-              "EBGaramond-BoldItalic.ttf"
-              "EBGaramond-SemiBold.ttf"
-              "EBGaramond-SemiBoldItalic.ttf")))
-  "Font files to download for the Org writer font, as (FILE . URL).")
+(defun init/org--text-scale-factor ()
+  "Return the current buffer's text scale multiplier."
+  (expt (if (boundp 'text-scale-mode-step) text-scale-mode-step 1.2)
+        (if (boundp 'text-scale-mode-amount) text-scale-mode-amount 0)))
 
-(defun init/org-install-writer-font ()
-  "Download EB Garamond into the user font directory."
-  (init/font-install-files init/org-writer-font-files))
+(defun init/org--refresh-fixed-pitch-remap ()
+  "Keep fixed-pitch Org regions in step with the prose scaling."
+  (when (derived-mode-p 'org-mode)
+    (when init/org--fixed-pitch-font-remap
+      (face-remap-remove-relative init/org--fixed-pitch-font-remap))
+    (setq init/org--fixed-pitch-font-remap
+          (face-remap-add-relative
+           'fixed-pitch
+           :height (* init/org-fixed-pitch-font-height
+                      (init/org--text-scale-factor))))))
 
-(defun init/org-ensure-writer-font ()
-  "Return an available writer font family, offering to install one.
-Uses the shared font installation flow and returns nil when unavailable."
-  (init/font-ensure
-   'org-writer
-   :families init/org-writer-font-families
-   :file-patterns '("EBGaramond*.ttf")
-   :default-family init/org-writer-font-family
-   :prompt "EB Garamond (Org writing font) is missing. Download and install it? "
-   :installer #'init/org-install-writer-font
-   :require-graphic t))
+(defun init/org--refresh-after-text-scale (&rest _)
+  "Refresh the Org font remaps and layout after a text-scale change."
+  (when (derived-mode-p 'org-mode)
+    (init/org--refresh-fixed-pitch-remap)
+    ;; Floated tags carry a pixel width measured at fontification time.
+    (font-lock-flush)
+    (redisplay t)))
+
+(defun init/org-writer-font-setup ()
+  "Use the writer font and comfortable spacing in this Org buffer.
+Code blocks, tables and metadata stay fixed-pitch through the face setup
+in the `org' :config block."
+  (when-let ((family (init/ensure-writer-font)))
+    (setq init/org--writer-font-remap
+          ;; Garamond has a small x-height; render it larger so body text
+          ;; sits comfortably next to the monospace UI.
+          (face-remap-add-relative 'variable-pitch
+                                   :family family
+                                   :height init/org-writer-font-height)))
+  (init/org--refresh-fixed-pitch-remap)
+  (variable-pitch-mode 1)
+  (setq-local line-spacing 0.15))
+
+(defun init/org-line-wrap-setup ()
+  "Soft-wrap Org prose at the window edge, on word boundaries."
+  (visual-line-mode 1))
+
+(defun init/org-set-heading-faces ()
+  "Set the font scale for Org document titles and heading levels."
+  (set-face-attribute 'org-document-title nil :height 1.8 :weight 'bold)
+  (dolist (spec '((org-level-1 . 1.45)
+                  (org-level-2 . 1.35)
+                  (org-level-3 . 1.25)
+                  (org-level-4 . 1.15)
+                  (org-level-5 . 1.10)
+                  (org-level-6 . 1.05)
+                  (org-level-7 . 1.00)
+                  (org-level-8 . 1.00)))
+    (set-face-attribute (car spec) nil
+                        :height (cdr spec)
+                        :weight 'semi-bold)))
+
+(defconst init/org-fixed-pitch-faces
+  '((org-block . fixed-pitch)
+    (org-table . fixed-pitch)
+    (org-checkbox . fixed-pitch)
+    (org-formula . fixed-pitch)
+    (org-date . fixed-pitch)
+    (org-code . (shadow fixed-pitch))
+    (org-verbatim . (shadow fixed-pitch))
+    (org-meta-line . (font-lock-comment-face fixed-pitch))
+    (org-special-keyword . (font-lock-comment-face fixed-pitch))
+    (org-document-info-keyword . (shadow fixed-pitch)))
+  "Org faces kept monospaced under `variable-pitch-mode'.
+Source blocks, tables and metadata only line up in a fixed-pitch font.")
+
+(defun init/org-set-fixed-pitch-faces ()
+  "Keep the technical parts of Org buffers monospaced."
+  (dolist (spec init/org-fixed-pitch-faces)
+    (set-face-attribute (car spec) nil :inherit (cdr spec))))
+
+;;;; Striped tables
 
 (defface init/org-table-header
   '((default :inherit org-table :weight bold :extend t)
@@ -95,13 +176,13 @@ Uses the shared font installation flow and returns nil when unavailable."
     (looking-at-p "|.*|[ \t]*$")))
 
 (defun init/org--table-body-row-index ()
-  "Return the zero-based body row index for the current Org table row."
+  "Return the zero-based body row index of the current Org table row.
+Return nil when the row is above the table's header separator."
   (let ((target (line-beginning-position))
         (seen-separator nil)
         (row-index 0))
     (save-excursion
-      (while (and (= 0 (forward-line -1))
-                  (init/org--table-line-p)))
+      (while (and (= 0 (forward-line -1)) (init/org--table-line-p)))
       (unless (init/org--table-line-p)
         (forward-line 1))
       (while (< (line-beginning-position) target)
@@ -113,101 +194,31 @@ Uses the shared font installation flow and returns nil when unavailable."
     (when seen-separator row-index)))
 
 (defun init/org-table-row-face ()
-  "Return the display face for the current Org table row."
+  "Return the display face for the Org table row at point, or nil."
   (save-excursion
     (beginning-of-line)
     (cond
      ((init/org--table-separator-line-p) nil)
      ((save-excursion
-        (and (= 0 (forward-line 1))
-             (init/org--table-separator-line-p)))
+        (and (= 0 (forward-line 1)) (init/org--table-separator-line-p)))
       'init/org-table-header)
      ((let ((row-index (init/org--table-body-row-index)))
         (and row-index (= 1 (% row-index 2))))
       'init/org-table-stripe))))
 
-(defconst init/org-writer-font-height 1.3
-  "Relative height used for Org prose.")
-
-(defconst init/org-fixed-pitch-font-height 1.0
-  "Relative height used for fixed-pitch Org regions.")
-
-(defun init/org--refresh-visual-fill-column ()
-  "Refresh Org's visual layout for the current text scale."
-  (when (derived-mode-p 'org-mode)
-    (redisplay t)))
-
-(defun init/org-insert-src-block (language)
-  "Insert an Org source block for LANGUAGE with useful defaults."
-  (interactive
-   (list (completing-read "Language: " (delete-dups (mapcar #'car org-babel-load-languages))
-                          nil nil nil nil "emacs-lisp")))
-  (insert (format "#+begin_src %s :results value :exports both\n\n#+end_src" language))
-  (forward-line -1))
-
-(defun init/org-line-wrap-setup ()
-  "Soft-wrap Org prose at the window edge.
-`visual-line-mode' wraps on word boundaries without inserting hard
-newlines."
-  (visual-line-mode 1))
-
-(defvar-local init/org--writer-font-remap nil
-  "Face-remap cookie for the writer font in the current Org buffer.")
-
-(defvar-local init/org--fixed-pitch-font-remap nil
-  "Face-remap cookie for scaled fixed-pitch regions in Org buffers.")
-
-(defun init/org--text-scale-factor ()
-  "Return the current buffer's text scale multiplier."
-  (expt (if (boundp 'text-scale-mode-step) text-scale-mode-step 1.2)
-        (if (boundp 'text-scale-mode-amount) text-scale-mode-amount 0)))
-
-(defun init/org--refresh-fixed-pitch-font-remap ()
-  "Keep fixed-pitch Org regions in step with Org prose scaling."
-  (when (derived-mode-p 'org-mode)
-    (when init/org--fixed-pitch-font-remap
-      (face-remap-remove-relative init/org--fixed-pitch-font-remap))
-    (setq init/org--fixed-pitch-font-remap
-          (face-remap-add-relative
-           'fixed-pitch
-           :height (* init/org-fixed-pitch-font-height
-                      (init/org--text-scale-factor))))))
-
-(defun init/org--refresh-layout-after-text-scale (&rest _)
-  "Refresh Org font remaps and visual layout after text-scale changes."
-  (when (derived-mode-p 'org-mode)
-    (init/org--refresh-fixed-pitch-font-remap)
-    ;; Floated tags carry a pixel width measured at fontification time.
-    (font-lock-flush)
-    (init/org--refresh-visual-fill-column)))
-
-(defun init/org-writer-font-setup ()
-  "Use the writerly font and comfortable spacing in this Org buffer only.
-Code blocks, tables and metadata stay fixed-pitch via the face setup in
-the org :config block."
-  (when-let ((family (init/org-ensure-writer-font)))
-    (setq init/org--writer-font-remap
-          ;; Garamond has a small x-height; render it larger so body
-          ;; text sits comfortably next to the monospace UI.
-          (face-remap-add-relative 'variable-pitch
-                                   :family family
-                                   :height init/org-writer-font-height)))
-  (init/org--refresh-fixed-pitch-font-remap)
-  (variable-pitch-mode 1)
-  (setq-local line-spacing 0.15))
-
-(defvar-local init/org--adding-parent-cookie nil
-  "Non-nil while adding a TODO statistics cookie to a parent heading.")
+;;;; Statistics cookies on TODO parents
 
 (defconst init/org-statistics-cookie-regexp
   "\\[[0-9]*\\(?:%\\|/[0-9]*\\)\\]"
-  "Regexp matching an Org TODO statistics cookie, including `[/]'.")
+  "Regexp matching an Org TODO statistics cookie, `[/]' included.")
+
+(defvar-local init/org--adding-parent-cookie nil
+  "Non-nil while adding a statistics cookie, to prevent re-entry.")
 
 (defun init/org-add-cookie-to-todo-parent ()
   "Add `[/]' to the TODO parent of the TODO heading at point.
-
-Do nothing when either heading is not a TODO item or the parent already
-has a statistics cookie."
+Does nothing when either heading is not a TODO item, or the parent
+already has a statistics cookie."
   (when (and (derived-mode-p 'org-mode)
              (not init/org--adding-parent-cookie))
     (save-excursion
@@ -234,74 +245,100 @@ has a statistics cookie."
   (add-hook 'post-command-hook
             #'init/org-add-parent-cookie-after-command nil t))
 
-(defun org-summary-todo (_n-done n-not-done)
-  "Switch entry to DONE when all subentries are done, to TODO otherwise."
+(defun init/org-summary-todo (_n-done n-not-done)
+  "Switch an entry to DONE when all N-NOT-DONE subentries are done.
+Used as an `org-after-todo-statistics-hook' function."
   (let ((org-log-done nil)
         (org-todo-log-states nil))
     (org-todo (if (= n-not-done 0) "DONE" "TODO"))))
 
+;;;; Journal and capture
+
+(defun init/org--journal-date (prompt)
+  "Return the datetree date list to visit.
+With PROMPT non-nil, ask for a date instead of using today."
+  (if prompt
+      (let ((time (org-read-date nil t nil "Journal date")))
+        (list (nth 4 (decode-time time))
+              (nth 3 (decode-time time))
+              (nth 5 (decode-time time))))
+    (calendar-current-date)))
+
 (defun init/org-goto-journal (&optional arg)
   "Visit today's entry in the journal datetree, creating it if needed.
-Point is left at the end of that day's entry so you keep a single entry
-per day and just keep writing.  With a prefix ARG, prompt for a
-different date instead of using today."
+Point is left at the end of that day's entry, so there is one entry per
+day that you simply keep writing.  With a prefix ARG, prompt for a
+different date."
   (interactive "P")
   (require 'org-datetree)
   (find-file (expand-file-name "journal.org" org-directory))
-  (org-datetree-find-date-create
-   (if arg
-       (let ((time (org-read-date nil t nil "Journal date")))
-         (list (nth 4 (decode-time time))
-               (nth 3 (decode-time time))
-               (nth 5 (decode-time time))))
-     (calendar-current-date)))
+  (org-datetree-find-date-create (init/org--journal-date arg))
   (when (fboundp 'org-fold-show-entry) (org-fold-show-entry))
   (org-end-of-subtree)
   (unless (bolp) (insert "\n")))
 
-(defun init/org-set-heading-faces ()
-  "Set the font scale for Org document titles and heading levels."
-  (set-face-attribute 'org-document-title nil :height 1.8 :weight 'bold)
-  (dolist (face-height '((org-level-1 . 1.45)
-                         (org-level-2 . 1.35)
-                         (org-level-3 . 1.25)
-                         (org-level-4 . 1.15)
-                         (org-level-5 . 1.10)
-                         (org-level-6 . 1.05)
-                         (org-level-7 . 1.00)
-                         (org-level-8 . 1.00)))
-    (set-face-attribute (car face-height) nil
-                        :height (cdr face-height)
-                        :weight 'semi-bold)))
+(defun init/org-capture-todo ()
+  "Capture a new TODO into the inbox."
+  (interactive)
+  (org-capture nil "t"))
 
-(defvar init/org-reference-popup-buffer-name "*Org Reference*"
+(defun init/org-insert-src-block (language)
+  "Insert an Org source block for LANGUAGE with useful defaults."
+  (interactive
+   (list (completing-read "Language: "
+                          (delete-dups (mapcar #'car org-babel-load-languages))
+                          nil nil nil nil "emacs-lisp")))
+  (insert (format "#+begin_src %s :results value :exports both\n\n#+end_src"
+                  language))
+  (forward-line -1))
+
+(defun init/org-find-file ()
+  "Open one of the Org files below `org-directory', with completion."
+  (interactive)
+  (unless (and (boundp 'org-directory)
+               org-directory
+               (file-directory-p org-directory))
+    (user-error "`org-directory' is not configured"))
+  (let* ((root (file-name-as-directory (expand-file-name org-directory)))
+         (files (directory-files-recursively root "\\.org\\(?:\\.gpg\\)?\\'"))
+         (relative (mapcar (lambda (file) (file-relative-name file root)) files)))
+    (find-file (expand-file-name (completing-read "Org file: " relative nil t)
+                                 root))))
+
+;;;; Local reference popups
+
+;; A `<<target>>' or `#+CUSTOM_ID' reference behaves like a symbol in
+;; code: M-. jumps to it through the xref marker stack, and hovering it
+;; -- or C-c C-. -- shows the target's text in a popup, so a definition
+;; can be read without leaving the line that mentions it.
+
+(defconst init/org-reference-popup-buffer "*Org Reference*"
   "Buffer used for the Org reference popup.")
-
-(defvar init/org-reference-popup-source-buffer nil
-  "Org buffer that owns the visible reference popup.")
-
-(defvar init/org-reference-popup-source-point nil
-  "Buffer position that opened the visible reference popup.")
-
-(defvar init/org-reference-popup-target nil
-  "Org reference target shown in the visible popup.")
-
-(defvar init/org-reference-popup-trigger nil
-  "How the current Org reference popup was opened: `manual' or `hover'.")
-
-(defvar init/org-reference-hover-timer nil
-  "Idle timer used to show Org reference popups on mouse hover.")
 
 (defcustom init/org-reference-hover-delay 0.35
   "Idle delay before showing an Org reference popup under the mouse."
   :type 'number
   :group 'org)
 
-(defun init/org-reference--link-target (&optional point)
-  "Return the local Org link target at POINT or point."
+(defvar init/org-reference--source-buffer nil
+  "Org buffer that owns the visible reference popup.")
+
+(defvar init/org-reference--source-point nil
+  "Buffer position that opened the visible reference popup.")
+
+(defvar init/org-reference--target nil
+  "Org reference target shown in the visible popup.")
+
+(defvar init/org-reference--trigger nil
+  "How the visible Org reference popup was opened: `manual' or `hover'.")
+
+(defvar init/org-reference--hover-timer nil
+  "Idle timer showing Org reference popups on mouse hover.")
+
+(defun init/org-reference--link-target (&optional position)
+  "Return the local Org link target at POSITION, or at point."
   (save-excursion
-    (when point
-      (goto-char point))
+    (when position (goto-char position))
     (let ((context (org-element-context)))
       (when (eq (org-element-type context) 'link)
         (let ((type (org-element-property :type context))
@@ -310,7 +347,7 @@ different date instead of using today."
             path))))))
 
 (defun init/org-reference--target-position (target)
-  "Return the position of TARGET in the current Org buffer."
+  "Return the position of TARGET in the current Org buffer, or nil."
   (save-excursion
     (save-restriction
       (widen)
@@ -318,13 +355,86 @@ different date instead of using today."
       (cond
        ((re-search-forward (format "<<%s>>" (regexp-quote target)) nil t)
         (line-beginning-position))
-       ((re-search-forward (format "^[[:space:]]*:CUSTOM_ID:[[:space:]]+%s[[:space:]]*$"
-                                   (regexp-quote target))
-                           nil t)
+       ((re-search-forward
+         (format "^[[:space:]]*:CUSTOM_ID:[[:space:]]+%s[[:space:]]*$"
+                 (regexp-quote target))
+         nil t)
         (line-beginning-position))
-       ((ignore-errors
-          (org-link-search target)
-          (point)))))))
+       ((ignore-errors (org-link-search target) (point)))))))
+
+(defun init/org-reference--content-end ()
+  "Return the end of the reference content starting at point.
+A heading contributes its subtree up to the first blank line; anything
+else contributes up to the first blank line, or the end of its line."
+  (save-excursion
+    (if (org-at-heading-p)
+        (save-restriction
+          (org-narrow-to-subtree)
+          (goto-char (point-min))
+          (if (re-search-forward "^[[:space:]]*$" nil t)
+              (line-beginning-position)
+            (point-max)))
+      (if (re-search-forward "^[[:space:]]*$" nil t)
+          (line-beginning-position)
+        (line-end-position)))))
+
+(defun init/org-reference--content (target)
+  "Return the display text for the local Org TARGET, or nil."
+  (when-let ((position (init/org-reference--target-position target)))
+    (save-excursion
+      (save-restriction
+        (widen)
+        (goto-char position)
+        (string-trim
+         (replace-regexp-in-string
+          (format "<<%s>>[[:space:]]*" (regexp-quote target))
+          ""
+          (buffer-substring-no-properties
+           (point) (init/org-reference--content-end))))))))
+
+(defun init/org-reference-popup-visible-p ()
+  "Return non-nil when the Org reference popup is visible."
+  (or init/org-reference--trigger
+      (init/popup-visible-p init/org-reference-popup-buffer)))
+
+(defun init/org-hide-reference-popup ()
+  "Hide the Org reference popup."
+  (interactive)
+  (setq init/org-reference--source-buffer nil
+        init/org-reference--source-point nil
+        init/org-reference--target nil
+        init/org-reference--trigger nil)
+  (init/popup-hide init/org-reference-popup-buffer))
+
+(defun init/org-reference--show (target trigger)
+  "Show TARGET in a popup near point, opened by TRIGGER."
+  (let ((content (or (init/org-reference--content target)
+                     (user-error "No local reference found for %s" target))))
+    (setq init/org-reference--source-buffer (current-buffer)
+          init/org-reference--source-point (point)
+          init/org-reference--target target
+          init/org-reference--trigger trigger)
+    (init/popup-show init/org-reference-popup-buffer content
+                     :mode #'org-mode)))
+
+(defun init/org-show-reference-popup ()
+  "Show the Org reference linked at point in a popup near point."
+  (interactive)
+  (unless (derived-mode-p 'org-mode)
+    (user-error "Org reference popup is only available in Org buffers"))
+  (init/org-reference--show
+   (or (init/org-reference--link-target)
+       (user-error "Point is not on a local Org reference link"))
+   'manual))
+
+(defun init/org-toggle-reference-popup ()
+  "Toggle the Org reference popup for the local reference at point."
+  (interactive)
+  (if (and (init/org-reference-popup-visible-p)
+           (eq init/org-reference--source-buffer (current-buffer))
+           (= init/org-reference--source-point (point)))
+      (init/org-hide-reference-popup)
+    (init/org-show-reference-popup)))
 
 (defun init/org-open-reference-with-xref ()
   "Open the local Org reference at point and push the xref marker stack."
@@ -337,164 +447,81 @@ different date instead of using today."
   (xref-push-marker-stack)
   (org-open-at-point))
 
-(defun init/org-reference--content (target)
-  "Return display text for local Org TARGET."
-  (when-let* ((pos (init/org-reference--target-position target)))
-    (save-excursion
-      (save-restriction
-        (widen)
-        (goto-char pos)
-        (let ((start (point))
-              (end (save-excursion
-                     (if (org-at-heading-p)
-                         (save-restriction
-                           (org-narrow-to-subtree)
-                           (goto-char (point-min))
-                           (if (re-search-forward "^[[:space:]]*$" nil t)
-                               (line-beginning-position)
-                             (point-max)))
-                       (if (re-search-forward "^[[:space:]]*$" nil t)
-                           (line-beginning-position)
-                         (line-end-position))))))
-          (string-trim
-           (replace-regexp-in-string
-            (format "<<%s>>[[:space:]]*" (regexp-quote target))
-            ""
-            (buffer-substring-no-properties start end))))))))
-
-(defun init/org-reference-popup-visible-p ()
-  "Return non-nil when the Org reference popup is visible."
-  (or init/org-reference-popup-trigger
-      (get-buffer-window init/org-reference-popup-buffer-name t)))
-
-(defun init/org-hide-reference-popup ()
-  "Hide the Org reference popup."
-  (interactive)
-  (setq init/org-reference-popup-source-buffer nil
-        init/org-reference-popup-source-point nil
-        init/org-reference-popup-target nil
-        init/org-reference-popup-trigger nil)
-  (if (fboundp 'posframe-hide)
-      (posframe-hide init/org-reference-popup-buffer-name)
-    (when-let* ((window (get-buffer-window init/org-reference-popup-buffer-name t)))
-      (quit-window nil window))))
-
-(defun init/org-reference--show-at-point (target trigger)
-  "Show TARGET in a popup near point using TRIGGER as popup source."
-  (let* ((content (or (init/org-reference--content target)
-                      (user-error "No local reference found for %s" target)))
-         (buffer (get-buffer-create init/org-reference-popup-buffer-name)))
-    (setq init/org-reference-popup-source-buffer (current-buffer)
-          init/org-reference-popup-source-point (point)
-          init/org-reference-popup-target target
-          init/org-reference-popup-trigger trigger)
-    (with-current-buffer buffer
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert content)
-        (goto-char (point-min))
-        (org-mode)
-        (setq-local mode-line-format nil)
-        (setq-local cursor-type nil)
-        (setq-local buffer-read-only t)
-        (visual-line-mode 1)))
-    (if (and (display-graphic-p) (require 'posframe nil t))
-        (posframe-show
-         buffer
-         :poshandler 'posframe-poshandler-point-bottom-left-corner
-         :max-width (max 50 (min 90 (floor (* (frame-width) 0.45))))
-         :max-height 12
-         :cursor nil
-         :accept-focus nil
-         :internal-border-width 1
-         :override-parameters '((no-other-window . t)
-                                (no-delete-other-windows . t)))
-      (let ((window (display-buffer
-                     buffer
-                     '((display-buffer-in-side-window)
-                       (side . bottom)
-                       (slot . 0)
-                       (window-parameters . ((no-delete-other-windows . t)
-                                             (no-other-window . t)))))))
-        (when (window-live-p window)
-          (fit-window-to-buffer window 12))))))
-
-(defun init/org-show-reference-popup ()
-  "Show the Org reference linked at point in a small popup near point."
-  (interactive)
-  (unless (derived-mode-p 'org-mode)
-    (user-error "Org reference popup is only available in Org buffers"))
-  (init/org-reference--show-at-point
-   (or (init/org-reference--link-target)
-       (user-error "Point is not on a local Org reference link"))
-   'manual))
-
-(defun init/org-toggle-reference-popup ()
-  "Toggle the Org reference popup for the local reference at point."
-  (interactive)
-  (if (and (init/org-reference-popup-visible-p)
-           (eq init/org-reference-popup-source-buffer (current-buffer))
-           (= init/org-reference-popup-source-point (point)))
-      (init/org-hide-reference-popup)
-    (init/org-show-reference-popup)))
-
 (defun init/org-reference-hide-on-point-move ()
-  "Hide the Org reference popup when its source cursor moves."
-  (when (and init/org-reference-popup-source-buffer
-             (eq init/org-reference-popup-source-buffer (current-buffer))
-             init/org-reference-popup-source-point
-             (/= init/org-reference-popup-source-point (point)))
+  "Hide the Org reference popup once its source cursor moves away."
+  (when (and init/org-reference--source-buffer
+             (eq init/org-reference--source-buffer (current-buffer))
+             init/org-reference--source-point
+             (/= init/org-reference--source-point (point)))
     (init/org-hide-reference-popup)))
 
 (defun init/org-reference--mouse-position ()
-  "Return (BUFFER . POINT) for the current mouse position, if any."
+  "Return (BUFFER . POSITION) under the mouse pointer, or nil."
   (pcase-let ((`(,frame ,x . ,y) (mouse-pixel-position)))
     (when (and (frame-live-p frame) (integerp x) (integerp y))
       (let* ((posn (posn-at-x-y x y frame t))
              (window (and posn (posn-window posn)))
-             (point (and posn (posn-point posn))))
-        (when (and (window-live-p window) (integer-or-marker-p point))
-          (cons (window-buffer window) point))))))
+             (position (and posn (posn-point posn))))
+        (when (and (window-live-p window) (integer-or-marker-p position))
+          (cons (window-buffer window) position))))))
+
+(defun init/org-reference--hover-hide ()
+  "Hide the popup if it was opened by hovering."
+  (when (eq init/org-reference--trigger 'hover)
+    (init/org-hide-reference-popup)))
+
+(defun init/org-reference--hover-stale-p (buffer position target)
+  "Return non-nil when the visible popup does not already show TARGET.
+BUFFER and POSITION are where the mouse now points."
+  (or (not (eq init/org-reference--trigger 'hover))
+      (not (eq init/org-reference--source-buffer buffer))
+      (/= init/org-reference--source-point position)
+      (not (equal init/org-reference--target target))))
+
+(defun init/org-reference--hover-show (buffer position target)
+  "Show TARGET for the link at POSITION in BUFFER, as a hover popup."
+  (when-let ((window (get-buffer-window buffer t)))
+    (save-selected-window
+      (select-window window)
+      (save-excursion
+        (goto-char position)
+        (init/org-reference--show target 'hover)))))
 
 (defun init/org-reference-hover-check ()
-  "Show or hide Org reference popup for the link under the mouse."
-  (let ((where (init/org-reference--mouse-position)))
-    (if (not where)
-        (when (eq init/org-reference-popup-trigger 'hover)
-          (init/org-hide-reference-popup))
-      (let ((buffer (car where))
-            (point (cdr where)))
-        (if (not (buffer-live-p buffer))
-            (when (eq init/org-reference-popup-trigger 'hover)
-              (init/org-hide-reference-popup))
-          (with-current-buffer buffer
-            (if (not (derived-mode-p 'org-mode))
-                (when (eq init/org-reference-popup-trigger 'hover)
-                  (init/org-hide-reference-popup))
-              (let ((target (init/org-reference--link-target point)))
-                (cond
-                 ((and target
-                       (or (not (eq init/org-reference-popup-trigger 'hover))
-                           (not (eq init/org-reference-popup-source-buffer buffer))
-                           (/= init/org-reference-popup-source-point point)
-                           (not (equal init/org-reference-popup-target target))))
-                  (when-let* ((window (get-buffer-window buffer t)))
-                    (save-selected-window
-                      (select-window window)
-                      (save-excursion
-                        (goto-char point)
-                        (init/org-reference--show-at-point target 'hover)))))
-                 ((and (not target)
-                       (eq init/org-reference-popup-trigger 'hover))
-                  (init/org-hide-reference-popup)))))))))))
+  "Show or hide the Org reference popup for the link under the mouse."
+  (pcase (init/org-reference--mouse-position)
+    (`(,buffer . ,position)
+     (if (not (buffer-live-p buffer))
+         (init/org-reference--hover-hide)
+       (with-current-buffer buffer
+         (if (not (derived-mode-p 'org-mode))
+             (init/org-reference--hover-hide)
+           (let ((target (init/org-reference--link-target position)))
+             (cond
+              ((null target) (init/org-reference--hover-hide))
+              ((init/org-reference--hover-stale-p buffer position target)
+               (init/org-reference--hover-show buffer position target))))))))
+    (_ (init/org-reference--hover-hide))))
 
 (defun init/org-enable-reference-popups ()
-  "Enable Org reference popup hiding and hover behavior."
+  "Enable Org reference popup hiding and hover behaviour."
   (add-hook 'post-command-hook #'init/org-reference-hide-on-point-move nil t)
-  (unless (timerp init/org-reference-hover-timer)
-    (setq init/org-reference-hover-timer
+  (unless (timerp init/org-reference--hover-timer)
+    (setq init/org-reference--hover-timer
           (run-with-idle-timer init/org-reference-hover-delay t
                                #'init/org-reference-hover-check))))
+
+;;;; Org itself
+
+(defconst init/org-text-scale-commands
+  '(text-scale-adjust text-scale-increase text-scale-decrease text-scale-set)
+  "Commands after which the Org layout has to be re-measured.")
+
+(defun init/org--advise-text-scale-commands ()
+  "Refresh the Org layout after every text-scale command."
+  (dolist (command init/org-text-scale-commands)
+    (unless (advice-member-p #'init/org--refresh-after-text-scale command)
+      (advice-add command :after #'init/org--refresh-after-text-scale))))
 
 (use-package org
   :ensure nil
@@ -513,9 +540,8 @@ different date instead of using today."
          ("M-," . xref-go-back))
   :custom
   (org-directory init/org-sync-directory)
-  ;; Scan the whole org directory for TODOs, SCHEDULED and DEADLINE items.
+  ;; Scan the whole Org directory for TODOs, SCHEDULED and DEADLINE items.
   (org-agenda-files (list init/org-sync-directory))
-  ;; Record a timestamp when a task is marked DONE.
   (org-log-done 'time)
   ;; Start the agenda on the current day and show one week.
   (org-agenda-start-on-weekday nil)
@@ -525,14 +551,16 @@ different date instead of using today."
   (org-hide-leading-stars t)
   (org-pretty-entities t)
   (org-ellipsis "…")
+  ;; Tags are floated by `init/org--tag-float', not padded with spaces:
+  ;; column padding never lines up under a proportional font.
   (org-auto-align-tags nil)
   (org-tags-column 0)
   (org-agenda-tags-column 0)
   (org-src-preserve-indentation t)
   (org-edit-src-content-indentation 0)
-  ;; File names below are relative to `org-directory'.  The journal is a
-  ;; single entry per day, so it is edited via `init/org-goto-journal'
-  ;; rather than captured (capture always appends a new item).
+  ;; Paths are relative to `org-directory'.  The journal is one entry per
+  ;; day, so it is edited through `init/org-goto-journal' rather than
+  ;; captured -- capture always appends a new item.
   (org-capture-templates
    '(("t" "TODO (inbox)" entry
       (file+headline "tasks.org" "Inbox")
@@ -543,66 +571,19 @@ different date instead of using today."
       "* TODO %?\nSCHEDULED: %^{Schedule}t\n%U"
       :empty-lines 1)))
   :config
-  ;; Load the agenda now so its keymap exists for menus and cheatsheets.
+  ;; Load the agenda now, so its keymap exists for the menus and
+  ;; cheatsheets that look bindings up live.
   (require 'org-agenda)
   (init/org-set-heading-faces)
-  ;; Keep the technical parts of Org buffers monospaced so source
-  ;; blocks, tables and metadata line up under variable-pitch-mode.
-  (dolist (spec '((org-block . fixed-pitch)
-                  (org-table . fixed-pitch)
-                  (org-checkbox . fixed-pitch)
-                  (org-formula . fixed-pitch)
-                  (org-date . fixed-pitch)
-                  (org-code . (shadow fixed-pitch))
-                  (org-verbatim . (shadow fixed-pitch))
-                  (org-meta-line . (font-lock-comment-face fixed-pitch))
-                  (org-special-keyword . (font-lock-comment-face fixed-pitch))
-                  (org-document-info-keyword . (shadow fixed-pitch))))
-    (set-face-attribute (car spec) nil :inherit (cdr spec)))
+  (init/org-set-fixed-pitch-faces)
+  (set-face-attribute 'org-level-1 nil :underline t)
   (font-lock-add-keywords
    'org-mode
    '(("^[ \t]*\\(|.*|\\)[ \t]*$" 0 (init/org-table-row-face) append))
    'append)
-  (set-face-attribute 'org-level-1 nil :underline t)
-  (dolist (command '(text-scale-adjust
-                     text-scale-increase
-                     text-scale-decrease
-                     text-scale-set))
-    (unless (advice-member-p
-             #'init/org--refresh-layout-after-text-scale
-             command)
-      (advice-add command :after
-                  #'init/org--refresh-layout-after-text-scale)))
-  (add-hook 'org-after-todo-state-change-hook
-            #'init/org-add-cookie-to-todo-parent)
-  (add-hook 'org-after-todo-statistics-hook #'org-summary-todo))
-
-;;;; Open a file in the org folder
-(defun init/org-find-file ()
-  "Find a org file"
-  (interactive)
-  (unless (and (boundp 'org-directory)
-	       org-directory
-	       (file-directory-p org-directory))
-    (user-error "`org-directory' is not configured"))
-  (let* ((root (file-name-as-directory
-		(expand-file-name org-directory)))
-	 (files (directory-files-recursively
-		 root "\\.org\\(?:\\.gpg\\)?\\'"))
-	 (relative-files
-	  (mapcar (lambda (f)
-		    (file-relative-name f root))
-		  files))
-	 (selection
-	  (completing-read "Org file: " relative-files nil t)))
-    (find-file (expand-file-name selection root))))
-
-;;;; Agenda menu
-
-(defun init/org-capture-todo ()
-  "Capture a new TODO into the inbox."
-  (interactive)
-  (org-capture nil "t"))
+  (init/org--advise-text-scale-commands)
+  (add-hook 'org-after-todo-state-change-hook #'init/org-add-cookie-to-todo-parent)
+  (add-hook 'org-after-todo-statistics-hook #'init/org-summary-todo))
 
 (easy-menu-define init/agenda-menu global-map
   "Agenda and capture actions."
@@ -620,20 +601,18 @@ different date instead of using today."
     ["Set deadline on heading" org-deadline
      :active (derived-mode-p 'org-mode)]))
 
-;;;; Tag pills: round labels, floated to the right window edge
+;;;; Tag pills
 
 ;; Two things happen to headline tags here.
 ;;
-;; They are floated: Org is told not to pad tags with real spaces
-;; (`org-auto-align-tags' is nil and `org-tags-column' is 0), because
-;; column padding never lines up under the proportional writer font.
-;; Instead the single space Org leaves before the tags is stretched to a
-;; measured pixel width, so the labels sit flush against the right window
-;; edge at any window width, font or text scale.
+;; They are floated.  Org is told not to pad tags with real spaces, so the
+;; single space it leaves before them is stretched to a measured pixel
+;; width instead; the labels then sit flush against the right window edge
+;; at any window width, font or text scale.
 ;;
-;; And they are rounded: each label is replaced by a small SVG image of a
-;; rounded rectangle with the tag inside.  Round ends cannot be had from
-;; a face, because Emacs paints a face background over the full height of
+;; And they are rounded.  Each label is replaced by a small SVG image of a
+;; rounded rectangle with the tag inside.  Round ends cannot be had from a
+;; face, because Emacs paints a face background over the full height of
 ;; the screen line -- which is why org-modern's own labels are as tall as
 ;; the headline they sit on -- and only an image can be both shorter than
 ;; the line and round.  Everything about the image is derived from the
@@ -682,18 +661,10 @@ size as the TODO label beside it.")
 (defvar init/org--tag-metrics-cache nil
   "Last measured pill font, as (KEY . METRICS).  See `init/org--tag-metrics'.")
 
-(defun init/org--tag-round-p ()
-  "Return non-nil when tag labels can be drawn as pills."
-  (and init/org-tag-round
-       (display-graphic-p)
-       (image-type-available-p 'svg)
-       (init/org--tag-metrics)
-       t))
-
 (defun init/org--face-attribute (face attribute)
   "Return ATTRIBUTE as specified by FACE, or nil.
-FACE is a face name, an attribute plist, or a list of either, as found
-in the `face' text property."
+FACE is a face name, an attribute plist, or a list of either, as found in
+the `face' text property."
   (cond
    ((keywordp (car-safe face)) (plist-get face attribute))
    ((consp face)
@@ -704,9 +675,9 @@ in the `face' text property."
 
 (defun init/org--tag-metrics ()
   "Return the pill font as (FAMILY SIZE ADVANCE ASCENT DESCENT), or nil.
-SIZE, ADVANCE, ASCENT and DESCENT are pixels.  The fixed-pitch font is
-used so a pill is exactly as wide as its label plus padding, and it is
-scaled with the buffer like the rest of the Org text."
+SIZE, ADVANCE, ASCENT and DESCENT are in pixels.  The fixed-pitch font is
+used, so a pill is exactly as wide as its label plus padding and scales
+with the buffer like the rest of the Org text."
   (let* ((scale (init/org--text-scale-factor))
          (key (list (frame-char-height) (frame-char-width) scale)))
     (unless (equal (car init/org--tag-metrics-cache) key)
@@ -725,9 +696,25 @@ scaled with the buffer like the rest of the Org text."
                               (aref info 8) (aref info 9))))))))
     (cdr init/org--tag-metrics-cache)))
 
+(defun init/org--tag-round-p ()
+  "Return non-nil when tag labels can be drawn as pills."
+  (and init/org-tag-round
+       (display-graphic-p)
+       (image-type-available-p 'svg)
+       (init/org--tag-metrics)
+       t))
+
+(defconst init/org--tag-svg-format
+  (concat "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%d\" height=\"%d\">"
+          "<rect width=\"%d\" height=\"%d\" rx=\"%s\" fill=\"%s\"/>"
+          "<text x=\"%d\" y=\"%d\" fill=\"%s\""
+          " font-family=\"%s\" font-size=\"%dpx\">%s</text>"
+          "</svg>")
+  "Format string producing the SVG source of one rounded tag pill.")
+
 (defun init/org--tag-image (label face)
   "Return a rounded pill image showing LABEL in the colours of FACE."
-  (when-let* ((metrics (init/org--tag-metrics)))
+  (when-let ((metrics (init/org--tag-metrics)))
     (pcase-let* ((`(,family ,size ,advance ,ascent ,descent) metrics)
                  (background (or (init/org--face-attribute face :background)
                                  (face-attribute 'init/org-tag :background nil t)))
@@ -743,54 +730,59 @@ scaled with the buffer like the rest of the Org text."
                   (height (+ ascent descent 2))
                   (width (+ (* (string-width label) advance) (* 2 padding))))
              (create-image
-              (format (concat "<svg xmlns=\"http://www.w3.org/2000/svg\""
-                              " width=\"%d\" height=\"%d\">"
-                              "<rect width=\"%d\" height=\"%d\""
-                              " rx=\"%s\" fill=\"%s\"/>"
-                              "<text x=\"%d\" y=\"%d\" fill=\"%s\""
-                              " font-family=\"%s\" font-size=\"%dpx\">%s</text>"
-                              "</svg>")
+              (format init/org--tag-svg-format
                       width height width height (/ height 2.0) background
                       padding (+ 1 ascent) foreground family size label)
               'svg t :ascent 'center :scale 1))
            init/org--tag-image-cache)))))
 
-(defun init/org--tag-pills (beg end)
-  "Draw every tag label between BEG and END as a rounded pill.
-The delimiting colons become the gaps between pills; the outer two are
-dropped so the labels sit flush."
+(defun init/org--tag-colon-positions (beg end)
+  "Return the positions of the tag-delimiting colons between BEG and END."
   (let (colons)
     (save-excursion
       (goto-char beg)
       (while (search-forward ":" end t)
         (push (match-beginning 0) colons)))
-    (setq colons (nreverse colons))
+    (nreverse colons)))
+
+(defun init/org--tag-hide-colons (colons)
+  "Replace the delimiting COLONS with the gaps drawn between pills.
+The outer two are dropped entirely, so the labels sit flush."
+  (let ((last (car (last colons)))
+        (gap (propertize " " 'face 'default)))
+    (dolist (colon colons)
+      (put-text-property colon (1+ colon) 'display
+                         (if (or (eq colon (car colons)) (eq colon last))
+                             ""
+                           gap)))))
+
+(defun init/org--tag-draw-pills (colons)
+  "Draw the label between each consecutive pair of COLONS as a pill."
+  (while (cdr colons)
+    (let* ((start (1+ (car colons)))
+           (finish (cadr colons))
+           (image (and (> finish start)
+                       (init/org--tag-image
+                        (buffer-substring-no-properties start finish)
+                        (get-text-property start 'face)))))
+      (when image
+        ;; The label face would paint a full-height block behind the image
+        ;; and square off its round corners.
+        (put-text-property start finish 'face 'default)
+        (put-text-property start finish 'display image)))
+    (setq colons (cdr colons))))
+
+(defun init/org--tag-pills (beg end)
+  "Draw every tag label between BEG and END as a rounded pill."
+  (let ((colons (init/org--tag-colon-positions beg end)))
     (when (cdr colons)
-      (let ((last (car (last colons)))
-            (gap (propertize " " 'face 'default)))
-        (dolist (colon colons)
-          (put-text-property colon (1+ colon) 'display
-                             (if (or (eq colon (car colons)) (eq colon last))
-                                 ""
-                               gap))))
-      (while (cdr colons)
-        (let* ((start (1+ (car colons)))
-               (finish (cadr colons))
-               (image (and (> finish start)
-                           (init/org--tag-image
-                            (buffer-substring-no-properties start finish)
-                            (get-text-property start 'face)))))
-          (when image
-            ;; The label face would paint a full-height block behind the
-            ;; image and square off its round corners.
-            (put-text-property start finish 'face 'default)
-            (put-text-property start finish 'display image)))
-        (setq colons (cdr colons))))))
+      (init/org--tag-hide-colons colons)
+      (init/org--tag-draw-pills colons))))
 
 (defun init/org--string-pixel-width (string)
   "Return the pixel width of STRING under this buffer's face remapping.
 Like `string-pixel-width', which measures with the global faces and so
-misses the writer font remap of Org buffers."
+misses the writer-font remap of Org buffers."
   (let ((remapping face-remapping-alist))
     (with-temp-buffer
       (setq-local face-remapping-alist remapping)
@@ -824,10 +816,10 @@ follow the window as it is resized."
 
 (defun init/org--tag-decorate (fontify &rest args)
   "Round tag pills and float headline tags, around FONTIFY.
-FONTIFY is `org-modern--tag' called with ARGS; it is fed match data
-whose group 1 is the space before the tags and group 2 the tag block.
-Rounding happens first, since it changes the width of the block that is
-then measured for floating."
+FONTIFY is `org-modern--tag' called with ARGS; it is fed match data whose
+group 1 is the space before the tags and group 2 the tag block.  Rounding
+happens first, since it changes the width of the block that is then
+measured for floating."
   (let ((headline (eq (char-after (match-beginning 0)) ?*))
         (space-beg (match-beginning 1))
         (space-end (match-end 1))
@@ -852,8 +844,8 @@ theme or font needs a refontification."
       (when (and (derived-mode-p 'org-mode) (bound-and-true-p font-lock-mode))
         (font-lock-flush)))))
 
-;; Modern Org styling: heading bullets, todo badges, tag pills, styled
-;; tables, checkboxes and timestamps.  Replaces org-superstar.
+;; Modern Org styling: heading bullets, TODO badges, tag pills, styled
+;; tables, checkboxes and timestamps.
 (use-package org-modern
   :hook ((org-mode . org-modern-mode)
          (org-agenda-finalize . org-modern-agenda))

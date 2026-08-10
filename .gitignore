@@ -39,7 +39,7 @@ projectile-frecency.eld
 projects
 
 # Geiser REPL history
-geiser-history.guile
+geiser-history*
 
 # Customize settings (user-specific)
 custom.el
@@ -60,10 +60,8 @@ places
 # Recentf history
 recentf
 
-# Persisted variable state (init-persist.el); legacy per-feature files
-# migrate into persisted-vars.el and are then removed automatically.
+# Persisted variable state (init-persist.el)
 persisted-vars.el
-theme-state.el
-menu-bar-state.el
-toolbar-state.el
+
+# Compiled native modules
 *.so

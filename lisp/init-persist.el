@@ -1,15 +1,15 @@
-;;; init-persist.el --- Unified early-loading variable persistence -*- lexical-binding: t; -*-
+;;; init-persist.el --- Variable state restored early at startup -*- lexical-binding: t; -*-
 
 ;;; Commentary:
 
 ;; A single place to persist Lisp variable values across sessions.
 ;;
-;; Emacs already has `custom-file' for this, but it is loaded late in
-;; `init.el' (after the modules that need the values have run) and mixes
-;; machine-generated package settings with user state.  Some of our state
-;; -- notably the selected theme -- must be known *before* those modules
-;; run, so this store is loaded early instead (see `init/persist-load',
-;; called near the top of `init.el').
+;; Emacs already has `custom-file' for this, but it is loaded at the very
+;; end of `init.el' -- after the modules that need the values have run --
+;; and it mixes machine-generated package settings with user state.  Some
+;; of this configuration's state, notably the selected theme, must be
+;; known *before* those modules run, so this store is loaded early
+;; instead (see `init/persist-load', called near the top of `init.el').
 ;;
 ;; To persist a new variable:
 ;;
@@ -18,49 +18,32 @@
 ;;   ...
 ;;   (init/persist-set 'my/variable VALUE)       ; when it changes
 ;;
-;; `init/persist-set' sets the variable and writes the whole store.  If
-;; you change the variable yourself (e.g. via `setq'), call
-;; `init/persist-save-variable' or `init/persist-save' to write it out.
-;; Registered variables are restored automatically at the next startup.
+;; `init/persist-set' sets the variable and writes the whole store.  When
+;; the variable is changed some other way, call
+;; `init/persist-save-variable' to write it out.  Registered variables
+;; are restored automatically at the next startup.
 
 ;;; Code:
+
+(require 'init-lib)
 
 (defconst init/persist-file
   (expand-file-name "persisted-vars.el" user-emacs-directory)
   "File holding all persisted variable values, restored early at startup.")
 
-(defconst init/persist-legacy-files
-  (mapcar (lambda (name) (expand-file-name name user-emacs-directory))
-          '("theme-state.el" "menu-bar-state.el" "toolbar-state.el"))
-  "Old per-feature state files folded into `init/persist-file' on upgrade.")
-
 (defvar init/persist-variables nil
   "List of symbols whose values are written to `init/persist-file'.")
 
 (defun init/persist-register (symbol)
-  "Mark SYMBOL for persistence in the unified store."
+  "Mark SYMBOL for persistence in the store and return it."
   (add-to-list 'init/persist-variables symbol)
   symbol)
 
 (defun init/persist--serialize (symbol)
-  "Return a `setq' form string that restores SYMBOL's current value."
+  "Return a `setq' form, as a string, restoring SYMBOL's current value."
   (format "(setq %s %s)\n"
           symbol
           (prin1-to-string (list 'quote (symbol-value symbol)))))
-
-(defun init/atomic-write-file (file writer)
-  "Write FILE atomically.  WRITER is called with a temporary file path; once
-it returns, that file is renamed onto FILE.  FILE is never left partially
-written: if WRITER signals or the rename fails, the temporary is removed
-and FILE is untouched.  A general utility, reused by any code that needs a
-crash-safe write (see `init/font--download')."
-  (let ((temporary (make-temp-file "emacs-atomic-")))
-    (unwind-protect
-        (progn
-          (funcall writer temporary)
-          (rename-file temporary file t))
-      (when (file-exists-p temporary)
-        (delete-file temporary)))))
 
 (defun init/persist-save ()
   "Write every registered, bound variable to `init/persist-file'."
@@ -75,7 +58,7 @@ crash-safe write (see `init/font--download')."
            (insert (init/persist--serialize symbol))))))))
 
 (defun init/persist-save-variable (symbol)
-  "Register SYMBOL if needed and persist the whole store."
+  "Register SYMBOL if needed, then write the whole store."
   (init/persist-register symbol)
   (init/persist-save))
 
@@ -85,24 +68,10 @@ crash-safe write (see `init/font--download')."
   (init/persist-save-variable symbol))
 
 (defun init/persist-load ()
-  "Restore persisted values, importing legacy state files on first upgrade.
+  "Restore the persisted variable values.
 Call this early in startup, before any module reads a persisted value."
-  (if (file-readable-p init/persist-file)
-      (load init/persist-file nil 'nomessage)
-    (dolist (file init/persist-legacy-files)
-      (when (file-readable-p file)
-        (load file nil 'nomessage)))))
-
-(defun init/persist--migrate ()
-  "Fold any legacy per-feature state files into the unified store, once.
-Runs after startup so every module has registered its variables."
-  (when (seq-some #'file-exists-p init/persist-legacy-files)
-    (init/persist-save)
-    (dolist (file init/persist-legacy-files)
-      (when (file-exists-p file)
-        (delete-file file)))))
-
-(add-hook 'emacs-startup-hook #'init/persist--migrate)
+  (when (file-readable-p init/persist-file)
+    (load init/persist-file nil 'nomessage)))
 
 (provide 'init-persist)
 ;;; init-persist.el ends here
