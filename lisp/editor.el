@@ -9,10 +9,8 @@
 
 ;;;; State variables
 
-(defvar init/frame-alpha-opaque 100
-  "Alpha-background value representing a fully opaque frame.")
-(defvar init/frame-alpha-translucent 95
-  "Alpha-background value used for translucent frames.")
+;; `init/frame-alpha-opaque' / `init/frame-alpha-translucent' are defined as
+;; customizable options in the "Frame transparency" section below.
 (defvar init/compilation-frame nil
   "The live child frame displaying the compilation buffer, or nil.")
 (defvar init/font-size 13
@@ -113,6 +111,51 @@
   (setq electric-pair-text-pairs electric-pair-pairs))
 
 ;;;; Frame transparency
+
+(defgroup init/frame-transparency nil
+  "Background transparency (alpha) for Emacs frames."
+  :group 'frames
+  :prefix "init/frame-alpha-")
+
+(defun init/frame-alpha--reapply ()
+  "Apply the current translucent alpha to translucent and future frames.
+The `alpha-background' entry in `default-frame-alist' is refreshed so new
+frames honour the value, and every existing frame that is not fully opaque
+is updated in place.  Frames sitting at the opaque level are left alone, so
+a Customize change to `init/frame-alpha-translucent' is reflected at once
+without forcing transparency onto frames the user made opaque."
+  (when (and (boundp 'init/frame-alpha-opaque)
+             (boundp 'init/frame-alpha-translucent))
+    (setf (alist-get 'alpha-background default-frame-alist)
+          init/frame-alpha-translucent)
+    (dolist (frame (frame-list))
+      (let ((current (frame-parameter frame 'alpha-background)))
+        (when (and current (< current init/frame-alpha-opaque))
+          (set-frame-parameter frame 'alpha-background
+                               init/frame-alpha-translucent))))))
+
+(defun init/frame-alpha--set (symbol value)
+  "Custom `:set' function: store VALUE in SYMBOL then refresh frames live."
+  (set-default symbol value)
+  (init/frame-alpha--reapply))
+
+(defcustom init/frame-alpha-opaque 100
+  "Alpha-background percentage representing a fully opaque frame.
+This is the baseline `init/toggle-frame-transparency' returns to; 100 means
+no transparency at all."
+  :type '(integer :tag "Percent (0-100)")
+  :set #'init/frame-alpha--set
+  :group 'init/frame-transparency)
+
+(defcustom init/frame-alpha-translucent 95
+  "Alpha-background percentage used for translucent frames.
+Lower is more see-through: 100 is fully opaque, 0 shows only whatever is
+behind Emacs.  Change it with \\[customize-option] `init/frame-alpha-translucent'
+\(or the `init/frame-transparency' group) and translucent frames update
+immediately."
+  :type '(integer :tag "Percent (0-100)")
+  :set #'init/frame-alpha--set
+  :group 'init/frame-transparency)
 
 (defun init/apply-frame-transparency (&optional frame)
   "Make FRAME use the configured translucent background alpha."

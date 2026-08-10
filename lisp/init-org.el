@@ -177,6 +177,8 @@ newlines."
   "Refresh Org font remaps and visual layout after text-scale changes."
   (when (derived-mode-p 'org-mode)
     (init/org--refresh-fixed-pitch-font-remap)
+    ;; Floated tags carry a pixel width measured at fontification time.
+    (font-lock-flush)
     (init/org--refresh-visual-fill-column)))
 
 (defun init/org-writer-font-setup ()
@@ -618,6 +620,238 @@ different date instead of using today."
     ["Set deadline on heading" org-deadline
      :active (derived-mode-p 'org-mode)]))
 
+;;;; Tag pills: round labels, floated to the right window edge
+
+;; Two things happen to headline tags here.
+;;
+;; They are floated: Org is told not to pad tags with real spaces
+;; (`org-auto-align-tags' is nil and `org-tags-column' is 0), because
+;; column padding never lines up under the proportional writer font.
+;; Instead the single space Org leaves before the tags is stretched to a
+;; measured pixel width, so the labels sit flush against the right window
+;; edge at any window width, font or text scale.
+;;
+;; And they are rounded: each label is replaced by a small SVG image of a
+;; rounded rectangle with the tag inside.  Round ends cannot be had from
+;; a face, because Emacs paints a face background over the full height of
+;; the screen line -- which is why org-modern's own labels are as tall as
+;; the headline they sit on -- and only an image can be both shorter than
+;; the line and round.  Everything about the image is derived from the
+;; face and the fixed-pitch font, so pills follow the theme and the text
+;; scale.
+
+(defface init/org-tag
+  '((default :inherit org-modern-label)
+    (((background light)) :background "#ece0ea" :foreground "#4a3446")
+    (t :background "#3b2a35" :foreground "#e3c3d4"))
+  "Face used for Org tag pills."
+  :group 'org)
+
+(defcustom init/org-tag-round t
+  "Non-nil draws Org tag labels as rounded pills.
+Needs a graphical frame with SVG support; org-modern's plain labels are
+used otherwise."
+  :type 'boolean
+  :group 'org)
+
+(defcustom init/org-tag-float t
+  "Non-nil floats headline tags against the right window edge."
+  :type 'boolean
+  :group 'org)
+
+(defcustom init/org-tag-right-margin 3.0
+  "Gap kept to the right of floated tags, in default character widths.
+The gap has to hold the fold ellipsis, which Org draws after the tags of
+a folded headline; in the writer font that is a little over two
+characters wide at the largest heading scale, and the headline wraps if
+it does not fit."
+  :type 'number
+  :group 'org)
+
+(defconst init/org-tag-pill-scale 0.8
+  "Pill text size relative to the fixed-pitch font.
+Matches the `org-modern-label' height, so a pill is lettered at the same
+size as the TODO label beside it.")
+
+(defconst init/org-tag-pill-padding 0.6
+  "Padding at each end of a pill, in pill character widths.")
+
+(defvar init/org--tag-image-cache (make-hash-table :test #'equal)
+  "Rendered tag pills, keyed by label, colours and font metrics.")
+
+(defvar init/org--tag-metrics-cache nil
+  "Last measured pill font, as (KEY . METRICS).  See `init/org--tag-metrics'.")
+
+(defun init/org--tag-round-p ()
+  "Return non-nil when tag labels can be drawn as pills."
+  (and init/org-tag-round
+       (display-graphic-p)
+       (image-type-available-p 'svg)
+       (init/org--tag-metrics)
+       t))
+
+(defun init/org--face-attribute (face attribute)
+  "Return ATTRIBUTE as specified by FACE, or nil.
+FACE is a face name, an attribute plist, or a list of either, as found
+in the `face' text property."
+  (cond
+   ((keywordp (car-safe face)) (plist-get face attribute))
+   ((consp face)
+    (seq-some (lambda (one) (init/org--face-attribute one attribute)) face))
+   ((and (symbolp face) (facep face))
+    (let ((value (face-attribute face attribute nil t)))
+      (unless (memq value '(nil unspecified)) value)))))
+
+(defun init/org--tag-metrics ()
+  "Return the pill font as (FAMILY SIZE ADVANCE ASCENT DESCENT), or nil.
+SIZE, ADVANCE, ASCENT and DESCENT are pixels.  The fixed-pitch font is
+used so a pill is exactly as wide as its label plus padding, and it is
+scaled with the buffer like the rest of the Org text."
+  (let* ((scale (init/org--text-scale-factor))
+         (key (list (frame-char-height) (frame-char-width) scale)))
+    (unless (equal (car init/org--tag-metrics-cache) key)
+      (setq init/org--tag-metrics-cache
+            (cons key
+                  (ignore-errors
+                    (let* ((family (face-attribute 'fixed-pitch :family nil t))
+                           (pixels (aref (font-info (face-font 'fixed-pitch)) 2))
+                           (size (max 6 (round (* init/org-tag-pill-scale
+                                                  scale pixels))))
+                           (info (font-info
+                                  (format "%s:pixelsize=%d" family size))))
+                      (when info
+                        ;; size, space width, ascent, descent
+                        (list family (aref info 2) (aref info 10)
+                              (aref info 8) (aref info 9))))))))
+    (cdr init/org--tag-metrics-cache)))
+
+(defun init/org--tag-image (label face)
+  "Return a rounded pill image showing LABEL in the colours of FACE."
+  (when-let* ((metrics (init/org--tag-metrics)))
+    (pcase-let* ((`(,family ,size ,advance ,ascent ,descent) metrics)
+                 (background (or (init/org--face-attribute face :background)
+                                 (face-attribute 'init/org-tag :background nil t)))
+                 (foreground (or (init/org--face-attribute face :foreground)
+                                 (face-attribute 'init/org-tag :foreground nil t)))
+                 (key (list label family size background foreground)))
+      (or (gethash key init/org--tag-image-cache)
+          (puthash
+           key
+           (let* ((padding (max 2 (round (* init/org-tag-pill-padding advance))))
+                  ;; A pixel of air above and below the letters keeps the
+                  ;; label off the rounded edge.
+                  (height (+ ascent descent 2))
+                  (width (+ (* (string-width label) advance) (* 2 padding))))
+             (create-image
+              (format (concat "<svg xmlns=\"http://www.w3.org/2000/svg\""
+                              " width=\"%d\" height=\"%d\">"
+                              "<rect width=\"%d\" height=\"%d\""
+                              " rx=\"%s\" fill=\"%s\"/>"
+                              "<text x=\"%d\" y=\"%d\" fill=\"%s\""
+                              " font-family=\"%s\" font-size=\"%dpx\">%s</text>"
+                              "</svg>")
+                      width height width height (/ height 2.0) background
+                      padding (+ 1 ascent) foreground family size label)
+              'svg t :ascent 'center :scale 1))
+           init/org--tag-image-cache)))))
+
+(defun init/org--tag-pills (beg end)
+  "Draw every tag label between BEG and END as a rounded pill.
+The delimiting colons become the gaps between pills; the outer two are
+dropped so the labels sit flush."
+  (let (colons)
+    (save-excursion
+      (goto-char beg)
+      (while (search-forward ":" end t)
+        (push (match-beginning 0) colons)))
+    (setq colons (nreverse colons))
+    (when (cdr colons)
+      (let ((last (car (last colons)))
+            (gap (propertize " " 'face 'default)))
+        (dolist (colon colons)
+          (put-text-property colon (1+ colon) 'display
+                             (if (or (eq colon (car colons)) (eq colon last))
+                                 ""
+                               gap))))
+      (while (cdr colons)
+        (let* ((start (1+ (car colons)))
+               (finish (cadr colons))
+               (image (and (> finish start)
+                           (init/org--tag-image
+                            (buffer-substring-no-properties start finish)
+                            (get-text-property start 'face)))))
+          (when image
+            ;; The label face would paint a full-height block behind the
+            ;; image and square off its round corners.
+            (put-text-property start finish 'face 'default)
+            (put-text-property start finish 'display image)))
+        (setq colons (cdr colons))))))
+
+(defun init/org--string-pixel-width (string)
+  "Return the pixel width of STRING under this buffer's face remapping.
+Like `string-pixel-width', which measures with the global faces and so
+misses the writer font remap of Org buffers."
+  (let ((remapping face-remapping-alist))
+    (with-temp-buffer
+      (setq-local face-remapping-alist remapping)
+      (setq-local display-line-numbers nil)
+      (insert (propertize string 'line-prefix nil 'wrap-prefix nil))
+      (car (buffer-text-pixel-size nil nil t)))))
+
+(defun init/org--tag-pixel-width (beg end)
+  "Return the rendered pixel width of the tag block between BEG and END."
+  (let ((window (get-buffer-window (current-buffer) t)))
+    (ignore-errors
+      (if window
+          (car (window-text-pixel-size window beg end))
+        (init/org--string-pixel-width (buffer-substring beg end))))))
+
+(defun init/org--tag-float (space-beg space-end tags-beg tags-end)
+  "Stretch SPACE-BEG..SPACE-END so the tags end at the right window edge.
+The tag block runs from TAGS-BEG to TAGS-END.  Only its width is baked
+in; `:align-to' resolves the edge itself during redisplay, so the tags
+follow the window as it is resized."
+  (let ((width (init/org--tag-pixel-width tags-beg tags-end)))
+    (when (and width (> width 0))
+      ;; Plain face on the gap: the headline face would otherwise draw its
+      ;; underline as a rule all the way out to the tags.
+      (put-text-property space-beg space-end 'face 'default)
+      (put-text-property
+       space-beg space-end 'display
+       `(space :align-to
+               (- right (,(+ width (round (* init/org-tag-right-margin
+                                             (frame-char-width)))))))))))
+
+(defun init/org--tag-decorate (fontify &rest args)
+  "Round tag pills and float headline tags, around FONTIFY.
+FONTIFY is `org-modern--tag' called with ARGS; it is fed match data
+whose group 1 is the space before the tags and group 2 the tag block.
+Rounding happens first, since it changes the width of the block that is
+then measured for floating."
+  (let ((headline (eq (char-after (match-beginning 0)) ?*))
+        (space-beg (match-beginning 1))
+        (space-end (match-end 1))
+        (tags-beg (match-beginning 2))
+        (tags-end (match-end 2)))
+    (apply fontify args)
+    (when (init/org--tag-round-p)
+      (init/org--tag-pills tags-beg tags-end))
+    ;; Agenda lines and #+filetags: keep their own alignment.
+    (when (and init/org-tag-float headline (derived-mode-p 'org-mode))
+      (init/org--tag-float space-beg space-end tags-beg tags-end))
+    nil))
+
+(defun init/org-refresh-tag-pills (&rest _)
+  "Redraw and re-measure the tag pills of every Org buffer.
+Their colours and width are baked in at fontification time, so a new
+theme or font needs a refontification."
+  (clrhash init/org--tag-image-cache)
+  (setq init/org--tag-metrics-cache nil)
+  (dolist (buffer (buffer-list))
+    (with-current-buffer buffer
+      (when (and (derived-mode-p 'org-mode) (bound-and-true-p font-lock-mode))
+        (font-lock-flush)))))
+
 ;; Modern Org styling: heading bullets, todo badges, tag pills, styled
 ;; tables, checkboxes and timestamps.  Replaces org-superstar.
 (use-package org-modern
@@ -629,7 +863,13 @@ different date instead of using today."
   (org-modern-table t)
   (org-modern-keyword t)
   (org-modern-checkbox '((?X . "☑") (?- . "◩") (?\s . "☐")))
-  (org-modern-list '((?- . "•") (?+ . "◦") (?* . "▹"))))
+  (org-modern-list '((?- . "•") (?+ . "◦") (?* . "▹")))
+  ;; Colour every tag through `init/org-tag' instead of leaving them on
+  ;; whatever `secondary-selection' the current theme happens to define.
+  (org-modern-tag-faces '((t . init/org-tag)))
+  :config
+  (advice-add 'org-modern--tag :around #'init/org--tag-decorate)
+  (add-hook 'enable-theme-functions #'init/org-refresh-tag-pills))
 
 (provide 'init-org)
 ;;; init-org.el ends here
