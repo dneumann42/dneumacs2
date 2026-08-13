@@ -19,7 +19,7 @@ name. `init.el` lists them in load order and nothing else.
 
 | Module | What it owns |
 | --- | --- |
-| `init-lib` | Shared helpers: atomic writes, PATH, project roots, popups |
+| `init-lib` | Shared helpers: file writes, PATH, project roots, popups |
 | `init-persist` | Variable state restored early at startup |
 | `init-packages` | Package archives and the `use-package` bootstrap |
 | `init-keys` | Every key sequence bound to a command defined here |
@@ -78,6 +78,38 @@ component of a Gradle composite build is indexed on its own instead of
 dragging in the umbrella above it. That root is applied through a
 buffer-local `project-find-functions` entry, so nothing else changes how
 projects resolve.
+
+## Startup and shutdown
+
+Opening and closing are treated as a budget. Three rules keep them quick,
+and each is implemented in the module that owns the feature.
+
+**A session records what was on screen, nothing else** (`init-projects`).
+Restoring a file buffer runs its major mode, tree-sitter, the fringe and
+colour overlays, a Git diff, and for code a language server, so the cost
+is roughly linear in buffers restored. Sessions therefore persist the
+buffers displayed in a window — plus `*scratch*` — and skip remote files
+and anything above `init/session-max-file-size`, either of which can stall
+startup on its own. Everything not restored is still a keypress away
+through `recentf` and `consult-buffer`. Set
+`easysession-buffer-list-function` to `buffer-list` to go back to
+persisting every live buffer. The session load reports its buffer count
+and elapsed time in the echo area, so a slow startup can be attributed
+rather than guessed at.
+
+**State files are written with `prin1`, not `pp`** (`init-lib`). Saved
+places and bm's bookmark repository both pretty-print their whole data
+structure on the way out, which has poor algorithmic complexity and lands
+squarely in the shutdown path. They are read back with `read`, so
+`init/write-state-file-fast` drops the reindentation as `:around` advice
+and the data is unchanged.
+
+**Nothing stats the world at either end** (`init-editor`). Saved places no
+longer check every recorded file for readability before writing, `recentf`
+prunes its list on an idle timer rather than while the mode is starting,
+and `confirm-kill-processes` is off — with a project open there is always a
+language server alive, so that prompt fired on every exit without ever
+saying anything useful. Unsaved buffers are still prompted for.
 
 ## Discovering it from inside Emacs
 

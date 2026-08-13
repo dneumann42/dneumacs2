@@ -33,6 +33,16 @@
 
 (setq create-lockfiles nil)
 
+;; Point is restored per file.  Two of `save-place-mode's defaults make
+;; writing the list slow enough to feel on exit: the whole alist is
+;; pretty printed, and every file recorded in it is checked for
+;; readability first -- a stat per entry, and a stall whenever one of
+;; them sits on a remote path.  Neither earns its cost; a stale entry is
+;; harmless and is overwritten the next time that file is visited.
+(setq save-place-limit 200
+      save-place-forget-unreadable-files nil)
+(advice-add 'save-place-alist-to-file :around #'init/write-state-file-fast)
+
 (save-place-mode 1)
 
 ;;;; General behaviour
@@ -57,6 +67,14 @@
 
 (add-hook 'prog-mode-hook #'display-line-numbers-mode)
 (add-hook 'prog-mode-hook #'hl-line-mode)
+
+;;;; Leaving Emacs
+
+;; Language servers, compilations, shells and Git subprocesses are all
+;; live processes, so with a project open the "kill them and exit anyway?"
+;; prompt fires on every single exit and never says anything worth the
+;; keystroke.  Buffers with unsaved changes are still prompted for.
+(setq confirm-kill-processes nil)
 
 ;;;; Electric pairs
 
@@ -104,10 +122,16 @@ in order."
 
 ;;;; Packages
 
+;; The recent file list is what makes a narrow session workable: buffers a
+;; session no longer restores are still one `consult-buffer' away.
 (use-package recentf
   :ensure nil
   :custom
   (recentf-max-saved-items 300)
+  ;; The list is pruned when Emacs has been idle for five minutes rather
+  ;; than when the mode is enabled, which is the default and stats all 300
+  ;; remembered files during startup.
+  (recentf-auto-cleanup 300)
   (recentf-exclude
    (list (regexp-quote (expand-file-name "elpa/" user-emacs-directory))
          (regexp-quote (expand-file-name "eln-cache/" user-emacs-directory))))

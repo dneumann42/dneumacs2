@@ -35,6 +35,37 @@ the temporary file is removed and FILE is untouched."
       (when (file-exists-p temporary)
         (delete-file temporary)))))
 
+;;;; State files
+
+;; Several state files -- saved places, bm's bookmark repository -- are
+;; written through `pp', which reindents the whole s-expression form by
+;; form.  It has poor algorithmic complexity, so once a file holds a few
+;; hundred entries the write alone takes noticeable time, and every one
+;; of these files is written while Emacs is shutting down.  They are all
+;; read back with plain `read', so the indentation is cosmetic: printing
+;; them with `prin1' instead leaves the data identical.
+
+(defmacro init/without-pretty-printing (&rest body)
+  "Evaluate BODY with `pp' and `pp-buffer' reduced to a plain `prin1'.
+Print limits are lifted as well, so a large structure can never be
+silently truncated into the file it is being written to."
+  (declare (indent 0) (debug t))
+  `(let ((print-length nil)
+         (print-level nil))
+     (cl-letf (((symbol-function 'pp-buffer) #'ignore)
+               ((symbol-function 'pp)
+                (lambda (object &optional stream)
+                  (let ((target (or stream standard-output)))
+                    (prin1 object target)
+                    (princ "\n" target)))))
+       ,@body)))
+
+(defun init/write-state-file-fast (original &rest arguments)
+  "Call ORIGINAL with ARGUMENTS, pretty printing disabled.
+Meant as `:around' advice on a function that writes a state file; see
+`init/without-pretty-printing'."
+  (init/without-pretty-printing (apply original arguments)))
+
 ;;;; Executable search path
 
 (defun init/prepend-to-path (directory)

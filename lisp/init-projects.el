@@ -12,7 +12,8 @@
 ;; Sessions are per project: switching projects loads that project's
 ;; window and buffer layout when one has been saved, and starts a fresh
 ;; session otherwise.  Sessions auto-save, so a restart lands you back
-;; where you were.
+;; where you were.  A session records the buffers that were on screen and
+;; nothing else -- see the Sessions section below for why.
 ;;
 ;; The project panel is a side window over a small registry of git
 ;; remotes (the `repos' file in this directory, one SSH URL per line).
@@ -34,6 +35,8 @@
 (declare-function easysession-reset "easysession")
 (declare-function easysession-save "easysession")
 (declare-function easysession-switch-to "easysession")
+(declare-function easysession-visible-buffer-list "easysession")
+(defvar easysession-visible-buffer-list-include-names)
 (declare-function projectile-add-known-project "projectile")
 (declare-function projectile-find-file "projectile")
 (declare-function projectile-remove-known-project "projectile")
@@ -113,6 +116,44 @@ you kill it, and `g' re-runs the same search."
 
 ;;;; Sessions
 
+;; A session persists the buffers that were on screen, not every buffer
+;; that happened to be alive.  Restoring a file buffer is far from free:
+;; it runs the major mode, tree-sitter, the fringe and colour overlays,
+;; asks Git for the diff, and for a code file starts a language server.
+;; A session that has drifted up to thirty buffers therefore costs
+;; seconds of startup and a burst of language servers for files nobody
+;; asked to see.  The window layout is the part worth restoring; the rest
+;; is one keypress away through recentf and `consult-buffer'.
+;;
+;; To go back to persisting every live buffer, set
+;; `easysession-buffer-list-function' to `buffer-list'.
+
+(defconst init/session-max-file-size (* 2 1024 1024)
+  "Largest file, in bytes, a session will record.
+Reopening a very large file is slow enough to be felt during startup, and
+it is rarely the file the session was resumed for.")
+
+(defun init/session-cheap-to-restore-p (buffer)
+  "Return non-nil when restoring BUFFER at startup is cheap.
+Remote files are rejected: reopening one makes TRAMP connect to the host
+while Emacs is still starting, which blocks until the host answers, or
+until it times out when the host is unreachable.  Files above
+`init/session-max-file-size' are rejected too.  Buffers not visiting a
+file cost nothing to recreate and are always kept."
+  (let ((file (buffer-local-value 'buffer-file-name buffer)))
+    (or (null file)
+        (and (not (file-remote-p file))
+             (let ((size (file-attribute-size (file-attributes file))))
+               (or (null size) (< size init/session-max-file-size)))))))
+
+(defun init/session-buffer-list ()
+  "Return the buffers a session should record: the ones on screen.
+This is `easysession-visible-buffer-list' -- buffers shown in a window or
+carried by a tab, plus *scratch* -- narrowed to those that are cheap to
+restore."
+  (seq-filter #'init/session-cheap-to-restore-p
+              (easysession-visible-buffer-list)))
+
 (use-package easysession
   :ensure t
   :demand t
@@ -122,10 +163,38 @@ you kill it, and `g' re-runs the same search."
   (easysession-mode-line-misc-info t)
   ;; Project sessions are created programmatically; never prompt about it.
   (easysession-confirm-new-session nil)
+  ;; Record the on-screen buffers only.
+  (easysession-buffer-list-function #'init/session-buffer-list)
   :config
+  ;; *scratch* is not displayed in a window most of the time, but it holds
+  ;; work in progress, so it is persisted regardless of visibility.
+  (add-to-list 'easysession-visible-buffer-list-include-names "*scratch*")
   ;; Restore the previous session, frame geometry included, and turn on
   ;; the auto-save mode.
   (easysession-setup))
+
+;; What the session cost, reported once it has been restored, so a slow
+;; startup can be attributed rather than guessed at.
+(defvar init/session--load-started nil
+  "Time the session currently being loaded started restoring.")
+
+(defun init/session--note-load-start ()
+  "Record when the session load began."
+  (setq init/session--load-started (current-time)))
+
+(defun init/session--report-load-time ()
+  "Report how long restoring the session took, and the startup total."
+  (when init/session--load-started
+    (let ((elapsed (float-time (time-since init/session--load-started))))
+      (setq init/session--load-started nil)
+      (message "Session '%s' restored in %.2fs: %d buffer(s) on screen (startup %s)"
+               (easysession-get-session-name)
+               elapsed
+               (length (init/session-buffer-list))
+               (emacs-init-time)))))
+
+(add-hook 'easysession-before-load-hook #'init/session--note-load-start)
+(add-hook 'easysession-after-load-hook #'init/session--report-load-time)
 
 ;; Keep the *scratch* buffer's contents across restarts.  easysession is
 ;; configured never to kill it, so it follows you between sessions too.

@@ -34,18 +34,6 @@
 
 ;;;; Saving
 
-(defun init/bm-save-without-pp (original &rest args)
-  "Call ORIGINAL, `bm-repository-save', with `pp-buffer' neutralised.
-ARGS are passed through.  `bm-repository-save' writes the repository with
-`prin1' and then pretty-prints it with `pp-buffer', which reindents the
-whole s-expression form by form and is pathologically slow once a few
-files' worth of bookmarks (each carrying context strings) accumulate --
-it dominates shutdown time.  The file is read back with plain `read', so
-the formatting is cosmetic; skipping it leaves the data identical and
-turns the write into a single fast `prin1'."
-  (cl-letf (((symbol-function 'pp-buffer) #'ignore))
-    (apply original args)))
-
 (defun init/bm-save-everything ()
   "Save every buffer's bookmarks and write the repository to disk."
   (when (featurep 'bm)
@@ -63,6 +51,15 @@ turns the write into a single fast `prin1'."
   (setq bm-restore-repository-on-load t)
   :custom
   (bm-repository-file (expand-file-name "bm-repository" user-emacs-directory))
+  ;; The repository is a list of per-file records, each carrying the text
+  ;; around every bookmark in that file.  bm keeps a thousand files' worth
+  ;; by default; a hundred is already far more history than the project
+  ;; picker is ever asked for, and it keeps each write, and each in-memory
+  ;; update on save, small.
+  (bm-repository-size 100)
+  ;; Errors only: bookmarks are a background convenience and their
+  ;; progress messages just displace more useful ones.
+  (bm-verbosity-level 1)
   ;; Fringe arrow plus a subtle line highlight.
   (bm-highlight-style 'bm-highlight-line-and-fringe)
   ;; M-] and M-[ cycle within the file; cross-file jumps go through the
@@ -81,7 +78,10 @@ turns the write into a single fast `prin1'."
          (vc-before-checkin . bm-buffer-save))
   :config
   (setq-default bm-buffer-persistence t)
-  (advice-add 'bm-repository-save :around #'init/bm-save-without-pp)
+  ;; `bm-repository-save' pretty-prints the repository it has just
+  ;; printed, which dominates the write; the file is read back with
+  ;; `read', so the formatting buys nothing.
+  (advice-add 'bm-repository-save :around #'init/write-state-file-fast)
   (add-hook 'kill-emacs-hook #'init/bm-save-everything))
 
 ;;;; Project-wide bookmark picker
