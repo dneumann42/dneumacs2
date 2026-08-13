@@ -143,6 +143,11 @@
 (defconst bind/ocaml-help "C-c o ?"
   "Key sequence for the OCaml cheatsheet.")
 
+(defconst bind/jvm-gradle-task "C-c j t"
+  "Key sequence for running an arbitrary Gradle task.")
+(defconst bind/jvm-help "C-c j ?"
+  "Key sequence for the Kotlin and Java cheatsheet.")
+
 (defconst bind/nim-mark-token "C-M-SPC"
   "Key sequence for marking the Nim token at point.")
 (defconst bind/nim-doc-search "C-c n n"

@@ -76,7 +76,15 @@
   ;; logging -- a large hidden buffer rewritten on every LSP message.
   (eglot-autoshutdown t)
   (eglot-events-buffer-config '(:size 0 :format full))
+  ;; Keep the server attached to library sources jumped into from a
+  ;; definition lookup; they lie outside the project and would otherwise
+  ;; open unmanaged.  `eglot-current-server' reads this in the file
+  ;; jumped *to*, so it cannot be set per language.
+  (eglot-extend-to-xref t)
   :config
+  ;; Kotlin and Java are absent from this list on purpose: their command
+  ;; lines depend on which build the buffer belongs to, so
+  ;; init-lang-jvm.el registers a function for each instead.
   (dolist (entry
            `(((c-mode c++-mode c-ts-mode c++-ts-mode) . ("clangd"))
              ((rust-mode rust-ts-mode) . (,init/rust-analyzer-command))

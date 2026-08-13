@@ -225,6 +225,26 @@ Interactively, prompt with completion over the registered cheatsheets."
     (:note "Everything else is the shared IDE keymap;")
     (:note "see the \"Coding & LSP\" guide.")))
 
+(cheatsheet-define "Kotlin & Java"
+  '("Gradle"
+    (init/jvm-run          "Run the module's run task"       :in init/ide-mode-map)
+    (init/jvm-build        "Build, skipping tests"           :in init/ide-mode-map)
+    (init/jvm-test-at-point "Run the test around point"      :in init/ide-mode-map)
+    (init/jvm-test-file    "Run this file's test class"      :in init/ide-mode-map)
+    (init/jvm-test-project "Run every test in the build"     :in init/ide-mode-map)
+    (init/jvm-gradle-task  "Run any Gradle task"))
+  '("Language servers"
+    (init/jvm-install-servers "Install or update the servers")
+    (init/ide-reconnect    "Restart the server for this buffer"
+                           :in init/ide-mode-map)
+    (:note "Kotlin is served by JetBrains' kotlin-lsp, Java by Eclipse JDT LS.")
+    (:note "Both install on first use and index in the background."))
+  '("Notes"
+    (:note "Tasks address the module owning the buffer, so a test")
+    (:note "runs alone rather than through the whole build.")
+    (:note "Everything else is the shared IDE keymap;")
+    (:note "see the \"Coding & LSP\" guide.")))
+
 (cheatsheet-define "Nim"
   '("Documentation"
     (init/nim-doc-search   "Search the stdlib index"  :in nim-mode-map)

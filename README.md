@@ -10,6 +10,7 @@ init.el           Loads the modules below, in dependency order
 lisp/             The modules
 themes/           Local themes, including the generated Wallust palette
 snippets/         YASnippet templates
+lsp-servers/      Language servers downloaded on demand (untracked)
 ```
 
 Every module is named `init-*.el`, so none of them can shadow a built-in
@@ -37,6 +38,7 @@ name. `init.el` lists them in load order and nothing else.
 | `init-org` | Org mode |
 | `init-ide` | Language servers and the shared IDE command layer |
 | `init-lang-eglot` | C/C++, Lua, Rust, OCaml, Python, Ruby, RON |
+| `init-lang-jvm` | Kotlin and Java, their servers and Gradle |
 | `init-lang-lisp` | Emacs Lisp, Scheme (Geiser), Common Lisp (SLY) |
 | `init-lang-nim` | Nim, including the documentation browser |
 | `init-lang-dsl` | The Owl and Nest major modes |
@@ -67,6 +69,15 @@ So <kbd>M-RET</kbd> always means "code actions" and <kbd>f5</kbd> always
 means "run", whatever the language, and a language module only has to
 declare where it differs. `C-c g` opens the cheatsheets, which look their
 key sequences up live and therefore cannot go stale.
+
+Most languages name a server in `init-ide.el` and are done. Kotlin and
+Java are the exception (`init-lang-jvm.el`): their servers are downloaded
+on first use rather than assumed installed, and each server is rooted at
+the *build* a file belongs to — the nearest `settings.gradle.kts` — so a
+component of a Gradle composite build is indexed on its own instead of
+dragging in the umbrella above it. That root is applied through a
+buffer-local `project-find-functions` entry, so nothing else changes how
+projects resolve.
 
 ## Discovering it from inside Emacs
 

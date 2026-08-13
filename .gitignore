@@ -4,6 +4,9 @@ elpa/
 # Emacs native compilation cache
 eln-cache/
 
+# Downloaded language servers (init-lang-jvm.el)
+lsp-servers/
+
 # Emacs cache and auto-save
 .cache/
 auto-save-list/
