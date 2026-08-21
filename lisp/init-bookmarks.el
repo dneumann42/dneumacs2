@@ -51,14 +51,11 @@
   (setq bm-restore-repository-on-load t)
   :custom
   (bm-repository-file (expand-file-name "bm-repository" user-emacs-directory))
-  ;; The repository is a list of per-file records, each carrying the text
-  ;; around every bookmark in that file.  bm keeps a thousand files' worth
-  ;; by default; a hundred is already far more history than the project
-  ;; picker is ever asked for, and it keeps each write, and each in-memory
-  ;; update on save, small.
+  ;; Each record carries the text around every bookmark in that file, and
+  ;; the whole list is copied on every buffer save.  bm's default of a
+  ;; thousand files is far more history than the picker is asked for.
   (bm-repository-size 100)
-  ;; Errors only: bookmarks are a background convenience and their
-  ;; progress messages just displace more useful ones.
+  ;; Errors only.
   (bm-verbosity-level 1)
   ;; Fringe arrow plus a subtle line highlight.
   (bm-highlight-style 'bm-highlight-line-and-fringe)
@@ -78,9 +75,6 @@
          (vc-before-checkin . bm-buffer-save))
   :config
   (setq-default bm-buffer-persistence t)
-  ;; `bm-repository-save' pretty-prints the repository it has just
-  ;; printed, which dominates the write; the file is read back with
-  ;; `read', so the formatting buys nothing.
   (advice-add 'bm-repository-save :around #'init/write-state-file-fast)
   (add-hook 'kill-emacs-hook #'init/bm-save-everything))
 

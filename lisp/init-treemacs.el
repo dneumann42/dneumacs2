@@ -12,15 +12,22 @@
 ;; $HOME.  Such a project keeps coming back through the persisted
 ;; workspace file, so it is stripped every time that file is read and
 ;; refused at the single point where projects are added.
+;;
+;; Which workspace was open is remembered across restarts too: Treemacs
+;; persists the workspaces themselves, but not the choice between them.
 
 ;;; Code:
 
 (require 'seq)
+(require 'init-persist)
 (require 'init-toolbar)
 
 (declare-function treemacs "treemacs")
+(declare-function treemacs-current-workspace "treemacs-workspaces")
 (declare-function treemacs-default-buffer-name "treemacs")
+(declare-function treemacs-do-switch-workspace "treemacs-workspaces")
 (declare-function treemacs-filewatch-mode "treemacs")
+(declare-function treemacs-find-workspace-by-name "treemacs-workspaces")
 (declare-function treemacs-follow-mode "treemacs")
 (declare-function treemacs-fringe-indicator-mode "treemacs")
 (declare-function treemacs-get-local-window "treemacs-scope")
@@ -30,6 +37,7 @@
 (declare-function treemacs-hide-gitignored-files-mode "treemacs")
 (declare-function treemacs-pulse-on-failure "treemacs-logging")
 (declare-function treemacs-pulse-on-success "treemacs-logging")
+(declare-function treemacs-workspace->name "treemacs-workspaces")
 (declare-function treemacs--find-project-for-path "treemacs-core-utils")
 
 ;;;; Header-line toolbar
@@ -173,6 +181,50 @@
      (if (bound-and-true-p treemacs-python-executable) 'deferred 'simple)))
   (treemacs-hide-gitignored-files-mode nil))
 
+;;;; Remembering the open workspace
+
+;; Treemacs persists the workspaces but not the choice between them:
+;; `treemacs-find-workspace-method' re-derives that on every start and
+;; falls back to whichever workspace is first in the list.
+
+(defvar init/treemacs-workspace nil
+  "Name of the Treemacs workspace to reopen at startup.
+Nil leaves the choice to `treemacs-find-workspace-method'.  A name that
+matches no workspace is ignored.  Restored by `init/persist-load' before
+this module loads.")
+
+(init/persist-register 'init/treemacs-workspace)
+
+(defun init/treemacs-remember-workspace (&rest _)
+  "Record the current Treemacs workspace as the one to reopen.
+Runs from the workspace switch and rename hooks, whose arguments are not
+needed here."
+  (when-let* ((workspace (ignore-errors (treemacs-current-workspace)))
+              (name (treemacs-workspace->name workspace)))
+    (unless (equal name init/treemacs-workspace)
+      (init/persist-set 'init/treemacs-workspace name))))
+
+(defun init/treemacs-restore-workspace ()
+  "Reopen the workspace named by `init/treemacs-workspace'.
+Deliberately does not record what it ends up on: when the name matches no
+workspace, Treemacs falls back to its own choice, and writing that back
+would discard the remembered name for good."
+  (when init/treemacs-workspace
+    ;; This call is what reads Treemacs's persist file, so the by-name
+    ;; lookup it populates has to come after it.
+    (let ((current (treemacs-current-workspace)))
+      (when-let ((workspace (treemacs-find-workspace-by-name
+                             init/treemacs-workspace)))
+        (unless (eq workspace current)
+          (treemacs-do-switch-workspace workspace))))))
+
+;; Not `treemacs-workspace-first-found-functions', the hook that looks
+;; built for this: Treemacs runs it with the variable's value instead of
+;; its symbol, so putting anything on it breaks every call to
+;; `treemacs-current-workspace'.
+(add-hook 'treemacs-switch-workspace-hook #'init/treemacs-remember-workspace)
+(add-hook 'treemacs-rename-workspace-functions #'init/treemacs-remember-workspace)
+
 (use-package treemacs
   :ensure t
   :defer t
@@ -186,7 +238,11 @@
               ("M-0"       . treemacs-select-window))
   :config
   (init/treemacs--configure)
-  (init/treemacs--enable-modes))
+  (init/treemacs--enable-modes)
+  ;; After the modes: switching workspaces consults
+  ;; `treemacs-hide-gitignored-files-mode', which is only bound once
+  ;; `init/treemacs--enable-modes' has run.
+  (init/treemacs-restore-workspace))
 
 ;; Never `defvar' `treemacs-project-map' here as a fallback: Treemacs
 ;; defines it with a plain defvar in treemacs-mode.el, so a prior defvar

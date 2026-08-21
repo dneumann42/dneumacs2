@@ -28,12 +28,14 @@
 (require 'transient)
 (require 'init-keys)
 (require 'init-lib)
+(require 'init-persist)
 
 (declare-function consult-ripgrep "consult")
 (declare-function easysession-get-session-file-path "easysession")
 (declare-function easysession-get-session-name "easysession")
 (declare-function easysession-reset "easysession")
 (declare-function easysession-save "easysession")
+(declare-function easysession-set-current-session-name "easysession")
 (declare-function easysession-switch-to "easysession")
 (declare-function easysession-visible-buffer-list "easysession")
 (defvar easysession-visible-buffer-list-include-names)
@@ -52,6 +54,13 @@
   :bind-keymap (("C-x p" . projectile-command-map)
                 ("C-c p" . projectile-command-map)
                 ("s-p"   . projectile-command-map))
+  :custom
+  ;; `projectile--dir-files-alien-await' busy-waits on a flag that only its
+  ;; process sentinel sets, and the sentinel skips it on any error -- a
+  ;; killed output buffer is enough -- so the wait then spins at 100% CPU
+  ;; forever on "Projectile is indexing ...".  The synchronous indexer it
+  ;; replaces takes 40ms on a 15k-file repository, so this buys nothing here.
+  (projectile-async-indexing nil)
   :config
   (projectile-mode +1))
 
@@ -117,29 +126,25 @@ you kill it, and `g' re-runs the same search."
 ;;;; Sessions
 
 ;; A session persists the buffers that were on screen, not every buffer
-;; that happened to be alive.  Restoring a file buffer is far from free:
-;; it runs the major mode, tree-sitter, the fringe and colour overlays,
-;; asks Git for the diff, and for a code file starts a language server.
-;; A session that has drifted up to thirty buffers therefore costs
-;; seconds of startup and a burst of language servers for files nobody
-;; asked to see.  The window layout is the part worth restoring; the rest
-;; is one keypress away through recentf and `consult-buffer'.
+;; that happened to be alive.  Restoring a file buffer runs its major
+;; mode, tree-sitter, the fringe and colour overlays, a Git diff, and for
+;; code a language server, so the cost is linear in buffers restored and a
+;; session that has drifted up to thirty of them costs seconds.  The
+;; window layout is the part worth restoring; the rest is one keypress
+;; away through recentf and `consult-buffer'.
 ;;
 ;; To go back to persisting every live buffer, set
 ;; `easysession-buffer-list-function' to `buffer-list'.
 
 (defconst init/session-max-file-size (* 2 1024 1024)
-  "Largest file, in bytes, a session will record.
-Reopening a very large file is slow enough to be felt during startup, and
-it is rarely the file the session was resumed for.")
+  "Largest file, in bytes, a session will record.")
 
 (defun init/session-cheap-to-restore-p (buffer)
   "Return non-nil when restoring BUFFER at startup is cheap.
-Remote files are rejected: reopening one makes TRAMP connect to the host
-while Emacs is still starting, which blocks until the host answers, or
-until it times out when the host is unreachable.  Files above
-`init/session-max-file-size' are rejected too.  Buffers not visiting a
-file cost nothing to recreate and are always kept."
+Remote files are rejected: reopening one makes TRAMP connect while Emacs
+is still starting, which blocks until the host answers or times out.
+Files above `init/session-max-file-size' are rejected too.  Buffers not
+visiting a file cost nothing to recreate and are always kept."
   (let ((file (buffer-local-value 'buffer-file-name buffer)))
     (or (null file)
         (and (not (file-remote-p file))
@@ -154,6 +159,39 @@ restore."
   (seq-filter #'init/session-cheap-to-restore-p
               (easysession-visible-buffer-list)))
 
+(defun init/session-exists-p (name)
+  "Return non-nil when a session called NAME has been saved."
+  (file-exists-p (easysession-get-session-file-path name)))
+
+;; easysession keeps the current session name in memory only, so
+;; `easysession-load' falls back to "main" on every start, whatever project
+;; you were last in.  The name goes in the init-persist store instead, and
+;; is handed back to easysession before its startup hook reads it.
+
+(defvar init/session-last-name nil
+  "Name of the session to reopen at startup.
+Nil, or a name with no saved session, leaves easysession its own default.
+Restored by `init/persist-load' before this module loads.")
+
+(init/persist-register 'init/session-last-name)
+
+(defun init/session-remember-name (&rest _)
+  "Record the current session as the one to reopen at startup.
+Runs from the session load and save hooks, whose arguments are not needed
+here."
+  (when-let ((name (easysession-get-session-name)))
+    (unless (equal name init/session-last-name)
+      (init/persist-set 'init/session-last-name name))))
+
+(defun init/session-restore-last-name ()
+  "Point easysession at the session recorded in `init/session-last-name'."
+  (when (and init/session-last-name
+             (init/session-exists-p init/session-last-name))
+    (easysession-set-current-session-name init/session-last-name)))
+
+(add-hook 'easysession-after-load-hook #'init/session-remember-name)
+(add-hook 'easysession-after-save-hook #'init/session-remember-name)
+
 (use-package easysession
   :ensure t
   :demand t
@@ -163,18 +201,18 @@ restore."
   (easysession-mode-line-misc-info t)
   ;; Project sessions are created programmatically; never prompt about it.
   (easysession-confirm-new-session nil)
-  ;; Record the on-screen buffers only.
   (easysession-buffer-list-function #'init/session-buffer-list)
   :config
-  ;; *scratch* is not displayed in a window most of the time, but it holds
-  ;; work in progress, so it is persisted regardless of visibility.
+  ;; *scratch* holds work in progress even when no window shows it.
   (add-to-list 'easysession-visible-buffer-list-include-names "*scratch*")
+  ;; Before `easysession-setup': it only queues the load on a startup hook,
+  ;; which reads the name this sets.
+  (init/session-restore-last-name)
   ;; Restore the previous session, frame geometry included, and turn on
   ;; the auto-save mode.
   (easysession-setup))
 
-;; What the session cost, reported once it has been restored, so a slow
-;; startup can be attributed rather than guessed at.
+;; Reported so a slow startup can be attributed rather than guessed at.
 (defvar init/session--load-started nil
   "Time the session currently being loaded started restoring.")
 
@@ -202,10 +240,6 @@ restore."
   :ensure t
   :config
   (persistent-scratch-setup-default))
-
-(defun init/session-exists-p (name)
-  "Return non-nil when a session called NAME has been saved."
-  (file-exists-p (easysession-get-session-file-path name)))
 
 (defun init/session-new (name)
   "Save the current session and start a fresh, empty session called NAME.
@@ -241,6 +275,11 @@ alone; everything else is closed."
   (concat "project: "
           (file-name-nondirectory (directory-file-name (expand-file-name root)))))
 
+(defun init/session-showing-a-file-p ()
+  "Return non-nil when a window in the selected frame shows a file buffer."
+  (seq-some (lambda (window) (buffer-file-name (window-buffer window)))
+            (window-list)))
+
 (defun init/session-projectile-switch-action ()
   "Open the selected project through its session.
 Runs as `projectile-switch-project-action', with `default-directory' set
@@ -255,7 +294,14 @@ find-file."
      ((equal name (easysession-get-session-name))
       (projectile-find-file))
      ((init/session-exists-p name)
-      (easysession-switch-to name))
+      (easysession-switch-to name)
+      ;; A session can restore no files at all -- it was saved with only
+      ;; Treemacs and *scratch* up, or an interrupted switch left it empty --
+      ;; which would otherwise land you on *scratch* with no way into the
+      ;; project.
+      (unless (init/session-showing-a-file-p)
+        (let ((default-directory root))
+          (projectile-find-file))))
      (t
       (easysession-switch-to name)
       (easysession-reset)

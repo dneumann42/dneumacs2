@@ -33,12 +33,9 @@
 
 (setq create-lockfiles nil)
 
-;; Point is restored per file.  Two of `save-place-mode's defaults make
-;; writing the list slow enough to feel on exit: the whole alist is
-;; pretty printed, and every file recorded in it is checked for
-;; readability first -- a stat per entry, and a stall whenever one of
-;; them sits on a remote path.  Neither earns its cost; a stale entry is
-;; harmless and is overwritten the next time that file is visited.
+;; Dropping the readability check costs nothing -- a stale entry is
+;; overwritten the next time that file is visited -- and saves a stat per
+;; entry on exit, plus a stall whenever one of them sits on a remote path.
 (setq save-place-limit 200
       save-place-forget-unreadable-files nil)
 (advice-add 'save-place-alist-to-file :around #'init/write-state-file-fast)
@@ -70,10 +67,9 @@
 
 ;;;; Leaving Emacs
 
-;; Language servers, compilations, shells and Git subprocesses are all
-;; live processes, so with a project open the "kill them and exit anyway?"
-;; prompt fires on every single exit and never says anything worth the
-;; keystroke.  Buffers with unsaved changes are still prompted for.
+;; With a project open there is always a language server alive, so this
+;; prompt fired on every exit without ever saying anything useful.
+;; Unsaved buffers are still prompted for.
 (setq confirm-kill-processes nil)
 
 ;;;; Electric pairs
@@ -128,9 +124,8 @@ in order."
   :ensure nil
   :custom
   (recentf-max-saved-items 300)
-  ;; The list is pruned when Emacs has been idle for five minutes rather
-  ;; than when the mode is enabled, which is the default and stats all 300
-  ;; remembered files during startup.
+  ;; Prune on an idle timer; the default prunes when the mode is enabled,
+  ;; stat-ing all 300 files during startup.
   (recentf-auto-cleanup 300)
   (recentf-exclude
    (list (regexp-quote (expand-file-name "elpa/" user-emacs-directory))

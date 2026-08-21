@@ -37,13 +37,10 @@ the temporary file is removed and FILE is untouched."
 
 ;;;; State files
 
-;; Several state files -- saved places, bm's bookmark repository -- are
-;; written through `pp', which reindents the whole s-expression form by
-;; form.  It has poor algorithmic complexity, so once a file holds a few
-;; hundred entries the write alone takes noticeable time, and every one
-;; of these files is written while Emacs is shutting down.  They are all
-;; read back with plain `read', so the indentation is cosmetic: printing
-;; them with `prin1' instead leaves the data identical.
+;; Saved places and bm's bookmark repository are written through `pp',
+;; whose poor algorithmic complexity dominates shutdown once the file
+;; holds a few hundred entries.  Both are read back with plain `read', so
+;; the indentation is cosmetic.
 
 (defmacro init/without-pretty-printing (&rest body)
   "Evaluate BODY with `pp' and `pp-buffer' reduced to a plain `prin1'.
