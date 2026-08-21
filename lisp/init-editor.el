@@ -15,6 +15,8 @@
 (require 'init-keys)
 (require 'init-lib)
 
+(declare-function treesit-auto--build-major-mode-remap-alist "treesit-auto")
+
 ;;;; Safety nets
 
 ;; Backups and auto-saves are kept -- they have saved real work -- but
@@ -153,11 +155,45 @@ in order."
   (global-set-key (kbd bind/surround) surround-keymap))
 
 ;; Prefer tree-sitter major modes and offer to install missing grammars.
+
+;; treesit-auto rebuilds `major-mode-remap-alist' from scratch inside every
+;; `set-auto-mode-0' call, and building it asks all sixty-odd languages it
+;; knows whether their grammar is available -- a shared-library load
+;; apiece.  That is ~95ms added to every file visited, so a session restore
+;; pays it once per buffer and so does every `find-file' afterwards.
+;;
+;; The answer only changes when a grammar is installed, so it is built once
+;; and reused.  treesit-auto declines to cache it so that a grammar
+;; installed mid-session is noticed; invalidating the cache after an install
+;; keeps that property.
+
+(defvar init/treesit--remap-alist 'stale
+  "Cached `major-mode-remap-alist' from treesit-auto, or `stale'.")
+
+(defun init/treesit-remap-alist ()
+  "Return treesit-auto's mode remapping, building it at most once."
+  (when (eq init/treesit--remap-alist 'stale)
+    (setq init/treesit--remap-alist (treesit-auto--build-major-mode-remap-alist)))
+  init/treesit--remap-alist)
+
+(defun init/treesit-set-major-remap (&rest _)
+  "Point `major-mode-remap-alist' at the cached remapping.
+Overrides `treesit-auto--set-major-remap', which rebuilds it every time."
+  (setq-local major-mode-remap-alist (init/treesit-remap-alist)))
+
+(defun init/treesit-invalidate-remap (&rest _)
+  "Forget the cached remapping so a newly installed grammar is picked up."
+  (setq init/treesit--remap-alist 'stale))
+
 (use-package treesit-auto
   :custom
   (treesit-auto-install 'prompt)
   :config
   (treesit-auto-add-to-auto-mode-alist 'all)
+  (advice-add 'treesit-auto--set-major-remap
+              :override #'init/treesit-set-major-remap)
+  (advice-add 'treesit-install-language-grammar
+              :after #'init/treesit-invalidate-remap)
   (global-treesit-auto-mode))
 
 (use-package ligature

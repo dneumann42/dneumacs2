@@ -540,6 +540,13 @@ BUFFER and POSITION are where the mouse now points."
          ("M-," . xref-go-back))
   :custom
   (org-directory init/org-sync-directory)
+  ;; Org loads every module listed here the first time an Org buffer opens,
+  ;; and the default list drags in Gnus, MH-E, Rmail, BBDB, w3m, DocView and
+  ;; BibTeX to provide link types for mail and browsers this setup does not
+  ;; use.  That is 415ms of the 450ms `org-mode' spends on its first buffer,
+  ;; and a session that restores an Org file pays it during startup.  `ol-doi'
+  ;; and `ol-info' are cheap and keep doi: and info: links working.
+  (org-modules '(ol-doi ol-info))
   ;; Scan the whole Org directory for TODOs, SCHEDULED and DEADLINE items.
   (org-agenda-files (list init/org-sync-directory))
   (org-log-done 'time)

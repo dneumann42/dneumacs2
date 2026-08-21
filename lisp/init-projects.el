@@ -12,8 +12,10 @@
 ;; Sessions are per project: switching projects loads that project's
 ;; window and buffer layout when one has been saved, and starts a fresh
 ;; session otherwise.  Sessions auto-save, so a restart lands you back
-;; where you were.  A session records the buffers that were on screen and
-;; nothing else -- see the Sessions section below for why.
+;; where you were -- unless a file or directory was named on the command
+;; line, which is a request to look at that path rather than to resume.  A
+;; session records the buffers that were on screen and nothing else -- see
+;; the Sessions section below for why.
 ;;
 ;; The project panel is a side window over a small registry of git
 ;; remotes (the `repos' file in this directory, one SSH URL per line).
@@ -163,6 +165,77 @@ restore."
   "Return non-nil when a session called NAME has been saved."
   (file-exists-p (easysession-get-session-file-path name)))
 
+;; `emacs some/file' or `emacs some/dir' asks to look at that path, not to
+;; resume yesterday's work: `command-line-1' visits the path just before
+;; `emacs-startup-hook' runs, so restoring a session there would bury it
+;; under the saved window layout.  The restore is skipped instead, and the
+;; session name is pointed at a throwaway -- the auto-save, and the save
+;; `easysession-switch-to' makes before switching away, would otherwise
+;; overwrite a real session with this ad-hoc state.
+
+(defconst init/session-command-line-name "command line"
+  "Session name used when a path is named on the Emacs command line.
+A throwaway: it is never restored, and never becomes the session reopened
+at the next startup.")
+
+(defun init/session--option-argument-count (option)
+  "Return how many arguments OPTION consumes on the Emacs command line.
+The window-system options come from the alists Emacs itself consults; the
+rest are the core options `command-line-1' reads an argument for, whose
+argument would otherwise be mistaken for a file to visit."
+  (cond
+   ((member option '("-L" "--directory" "-l" "--load" "-f" "--funcall"
+                     "--eval" "--execute" "--insert" "--chdir" "-u" "--user"
+                     "--script" "--init-directory" "--dump-file" "--seccomp"
+                     "-t" "--terminal" "--color"))
+    1)
+   ((cadr (assoc option command-line-x-option-alist)))
+   ((cadr (assoc option command-line-ns-option-alist)))
+   (t 0)))
+
+(defun init/session-command-line-paths ()
+  "Return the files and directories named on the Emacs command line.
+This mirrors what `command-line-1' will treat as a file: an argument that
+is not an option and was not consumed by one.  Option arguments -- the
+FILE in `-l FILE', the colour in `-fg COLOUR' -- are stepped over, and a
+path that does not exist yet still counts, since `emacs notes.md' on a new
+file is as much a request to edit it as on an old one."
+  (let ((arguments (cdr command-line-args))
+        (paths nil))
+    (while arguments
+      (let ((argument (pop arguments)))
+        (cond
+         ;; Everything after the magic `--' is a file name, dash or not.
+         ((equal argument "--")
+          (setq paths (append (reverse arguments) paths)
+                arguments nil))
+         ;; An option.  The `--option=value' form carries its own argument.
+         ((string-prefix-p "-" argument)
+          (unless (string-search "=" argument)
+            (setq arguments (nthcdr (init/session--option-argument-count argument)
+                                    arguments))))
+         ;; `+LINE' and `+LINE:COLUMN' position the file that follows.
+         ((string-match-p "\\`\\+[0-9]+\\(:[0-9]+\\)?\\'" argument))
+         (t
+          (push argument paths)))))
+    (nreverse paths)))
+
+(defvar init/session-startup-paths (init/session-command-line-paths)
+  "Files and directories named on the command line Emacs was started with.
+Computed as this module loads, which is before `command-line-1' visits
+them and before easysession decides whether to restore a session.")
+
+(defun init/session-command-line-start-p ()
+  "Return non-nil when this Emacs was started to look at a path.
+Nil under a daemon: its frames outlive the command line that started it,
+so `server-after-make-frame-hook' should go on restoring the session."
+  (and init/session-startup-paths (not (daemonp))))
+
+(defun init/session-restore-p ()
+  "Return non-nil when the previous session should be restored at startup.
+Runs as `easysession-setup-load-predicate'."
+  (not (init/session-command-line-start-p)))
+
 ;; easysession keeps the current session name in memory only, so
 ;; `easysession-load' falls back to "main" on every start, whatever project
 ;; you were last in.  The name goes in the init-persist store instead, and
@@ -180,14 +253,23 @@ Restored by `init/persist-load' before this module loads.")
 Runs from the session load and save hooks, whose arguments are not needed
 here."
   (when-let ((name (easysession-get-session-name)))
-    (unless (equal name init/session-last-name)
+    (unless (or (equal name init/session-last-name)
+                ;; The throwaway session must never be the one reopened.
+                (equal name init/session-command-line-name))
       (init/persist-set 'init/session-last-name name))))
 
 (defun init/session-restore-last-name ()
-  "Point easysession at the session recorded in `init/session-last-name'."
-  (when (and init/session-last-name
-             (init/session-exists-p init/session-last-name))
-    (easysession-set-current-session-name init/session-last-name)))
+  "Choose the session name easysession starts out in.
+Normally the one recorded in `init/session-last-name'.  When a path was
+named on the command line nothing is restored, so the name points at
+`init/session-command-line-name' and this session's saves land in the
+throwaway rather than over the layout you left behind."
+  (cond
+   ((init/session-command-line-start-p)
+    (easysession-set-current-session-name init/session-command-line-name))
+   ((and init/session-last-name
+         (init/session-exists-p init/session-last-name))
+    (easysession-set-current-session-name init/session-last-name))))
 
 (add-hook 'easysession-after-load-hook #'init/session-remember-name)
 (add-hook 'easysession-after-save-hook #'init/session-remember-name)
@@ -202,6 +284,9 @@ here."
   ;; Project sessions are created programmatically; never prompt about it.
   (easysession-confirm-new-session nil)
   (easysession-buffer-list-function #'init/session-buffer-list)
+  ;; Started on a path?  Then the command line, not the session, decides
+  ;; what is on screen.
+  (easysession-setup-load-predicate #'init/session-restore-p)
   :config
   ;; *scratch* holds work in progress even when no window shows it.
   (add-to-list 'easysession-visible-buffer-list-include-names "*scratch*")
@@ -233,6 +318,18 @@ here."
 
 (add-hook 'easysession-before-load-hook #'init/session--note-load-start)
 (add-hook 'easysession-after-load-hook #'init/session--report-load-time)
+
+(defun init/session--report-command-line-start ()
+  "Say that the command line, not a session, decided what is on screen."
+  (when (init/session-command-line-start-p)
+    (message "Opened %s from the command line; session not restored (startup %s)"
+             (string-join (mapcar #'abbreviate-file-name init/session-startup-paths)
+                          ", ")
+             (emacs-init-time))))
+
+;; After `easysession-setup-add-hook-depth', so the message is the last
+;; thing said about startup rather than the first.
+(add-hook 'emacs-startup-hook #'init/session--report-command-line-start 103)
 
 ;; Keep the *scratch* buffer's contents across restarts.  easysession is
 ;; configured never to kill it, so it follows you between sessions too.

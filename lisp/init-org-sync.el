@@ -61,6 +61,15 @@ our push; re-fetching and pushing again resolves it without a conflict."
   :type 'integer
   :group 'init/org-sync)
 
+(defcustom init/org-sync-exit-timeout 5
+  "Seconds the exit flush may spend pushing before it gives up.
+The commit is already on disk when the push starts, so abandoning it costs
+nothing but a delay: the next session sends it.  `process-file' cannot be
+bounded -- it blocks Lisp, timers included -- so the exit push runs as a
+real process."
+  :type 'number
+  :group 'init/org-sync)
+
 (defcustom init/org-sync-fetch-interval 300
   "Minimum seconds between remote fetches during automatic synchronisation.
 Local commits are always integrated and pushed promptly; this only
@@ -378,16 +387,52 @@ Retries when the remote advanced between the fetch and the push."
                      (if (string-empty-p output) ""
                        (concat ": " output))))))))))
 
-(defun init/org-sync--wait-for-process ()
-  "Wait for an active asynchronous Org synchronisation to finish."
-  (when (timerp init/org-sync--timer)
-    (cancel-timer init/org-sync--timer)
-    (setq init/org-sync--timer nil))
-  (while (process-live-p init/org-sync--process)
-    (accept-process-output init/org-sync--process 0.1))
+(defun init/org-sync--cancel-timer ()
+  "Cancel the pending idle synchronisation, if one is scheduled."
   (when (timerp init/org-sync--timer)
     (cancel-timer init/org-sync--timer)
     (setq init/org-sync--timer nil)))
+
+(defun init/org-sync--wait-for-process ()
+  "Wait for an active asynchronous Org synchronisation to finish."
+  (init/org-sync--cancel-timer)
+  (while (process-live-p init/org-sync--process)
+    (accept-process-output init/org-sync--process 0.1))
+  (init/org-sync--cancel-timer))
+
+(defun init/org-sync--await-process (seconds)
+  "Wait at most SECONDS for the asynchronous synchronisation to finish.
+Return non-nil when nothing is running any more."
+  (let ((deadline (+ (float-time) seconds)))
+    (while (and (process-live-p init/org-sync--process)
+                (< (float-time) deadline))
+      (accept-process-output init/org-sync--process 0.05))
+    (not (process-live-p init/org-sync--process))))
+
+(defun init/org-sync--git-await (seconds &rest arguments)
+  "Run Git ARGUMENTS, waiting at most SECONDS for them to finish.
+Return a cons of exit status and trimmed output, as `init/org-sync--git'
+does, or nil when the deadline passed -- the process is killed in that
+case.  This exists for the exit path, which must not be able to hold
+Emacs open on a slow or unreachable network."
+  (let* ((buffer (generate-new-buffer " *org-sync-exit*"))
+         (process (make-process
+                   :name "org-git-exit"
+                   :buffer buffer
+                   :noquery t
+                   :command (append (list "git" "-C" init/org-sync-directory)
+                                    arguments)))
+         (deadline (+ (float-time) seconds)))
+    (unwind-protect
+        (progn
+          (while (and (process-live-p process) (< (float-time) deadline))
+            (accept-process-output process 0.05))
+          (if (process-live-p process)
+              (progn (delete-process process) nil)
+            (cons (process-exit-status process)
+                  (string-trim (with-current-buffer buffer (buffer-string))))))
+      (when (buffer-live-p buffer)
+        (kill-buffer buffer)))))
 
 (defun init/org-sync-now ()
   "Synchronously save, commit, fetch, rebase and push the Org repository."
@@ -576,13 +621,42 @@ ARGUMENTS are passed through."
     (let ((init/org-sync--inhibit t))
       (apply original arguments))))
 
+(defun init/org-sync--pending-work-p ()
+  "Return non-nil when there is local Org work the remote has not seen.
+Cheapest test first: an unsaved buffer needs no Git at all, a dirty tree
+needs one `git status', and only then is the upstream compared.
+
+Deliberately not part of this: whether a fetch is due, and whether an idle
+timer is armed.  Neither is local work -- and the timer is armed by merely
+*visiting* an Org file, which a session restore does at every startup."
+  (or (init/org-sync--modified-repository-buffers-p)
+      (init/org-sync--dirty-p)
+      (> (init/org-sync--ahead-count) 0)))
+
 (defun init/org-sync--flush-on-exit ()
-  "Make a best effort to commit and push pending Org changes before exit."
+  "Commit and push pending Org work before Emacs exits.
+Exit is not the place for a full synchronisation: a fetch on the way out is
+discarded along with the process, and rebasing onto what it brought back
+risks leaving a half-finished tree behind with nobody watching.  So this
+commits only when there is something to commit, pushes only when the remote
+is behind, never fetches, and gives the push
+`init/org-sync-exit-timeout' seconds.  Anything not sent stays in Git and
+goes out with the next session's background synchronisation."
   (condition-case err
-      (when (or (timerp init/org-sync--timer)
-                init/org-sync--process
-                (init/org-sync--modified-repository-buffers-p))
-        (init/org-sync-now))
+      (progn
+        (init/org-sync--cancel-timer)
+        (when (and (init/org-sync--pending-work-p)
+                   (init/org-sync--await-process init/org-sync-exit-timeout))
+          (init/org-sync--save-repository-buffers)
+          (init/org-sync--commit-local-changes)
+          (when (> (init/org-sync--ahead-count) 0)
+            (pcase (init/org-sync--git-await init/org-sync-exit-timeout "push")
+              ('nil
+               (message "Org push timed out; the commit goes out next session"))
+              (`(,status . ,output)
+               (unless (zerop status)
+                 (message "Org push failed; the commit goes out next session%s"
+                          (if (string-empty-p output) "" (concat ": " output)))))))))
     (error
      (message "Final Org sync failed; local work remains in Git: %s"
               (error-message-string err)))))
