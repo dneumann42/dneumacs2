@@ -41,7 +41,7 @@ name. `init.el` lists them in load order and nothing else.
 | `init-lang-jvm` | Kotlin and Java, their servers and Gradle |
 | `init-lang-lisp` | Emacs Lisp, Scheme (Geiser), Common Lisp (SLY) |
 | `init-lang-nim` | Nim, including the documentation browser |
-| `init-lang-dsl` | The Owl and Nest major modes |
+| `init-owl` | The Owl major mode |
 | `init-cheatsheet` | The cheatsheet framework and the guides themselves |
 
 ## Conventions

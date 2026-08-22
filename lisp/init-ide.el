@@ -47,6 +47,12 @@
   :type 'string
   :group 'init/lsp)
 
+(defcustom init/clangd-command
+  '("clangd" "--fallback-style={BasedOnStyle: LLVM, IndentWidth: 4, TabWidth: 4, UseTab: Never}")
+  "Command used to start clangd for C and C++."
+  :type '(repeat string)
+  :group 'init/lsp)
+
 (defcustom init/ocaml-lsp-server-command "ocamllsp"
   "Command used to start the OCaml language server."
   :type 'string
@@ -86,7 +92,7 @@
   ;; lines depend on which build the buffer belongs to, so
   ;; init-lang-jvm.el registers a function for each instead.
   (dolist (entry
-           `(((c-mode c++-mode c-ts-mode c++-ts-mode) . ("clangd"))
+           `(((c-mode c++-mode c-ts-mode c++-ts-mode) . ,init/clangd-command)
              ((rust-mode rust-ts-mode) . (,init/rust-analyzer-command))
              ((lua-mode lua-ts-mode) . (,init/lua-lsp-server-command))
              ((ruby-mode ruby-ts-mode) . (,init/ruby-lsp-server-command))

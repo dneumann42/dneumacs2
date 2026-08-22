@@ -13,7 +13,7 @@
 ;; that language different.
 ;;
 ;; Languages with substantial support of their own live in their own
-;; files: init-lang-lisp.el, init-lang-nim.el and init-lang-dsl.el.
+;; files: init-lang-lisp.el, init-lang-nim.el and init-owl.el.
 
 ;;; Code:
 
@@ -25,6 +25,92 @@
 (declare-function cheatsheet-show "init-cheatsheet")
 
 ;;; C and C++
+
+(defcustom init/c-auto-create-clang-format t
+  "When non-nil, create a project .clang-format for C and C++ buffers."
+  :type 'boolean
+  :group 'init/lsp)
+
+(defcustom init/c-auto-create-compile-flags t
+  "When non-nil, create project compile_flags.txt for C and C++ buffers."
+  :type 'boolean
+  :group 'init/lsp)
+
+(defconst init/c-default-clang-format
+  "BasedOnStyle: LLVM
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+"
+  "Default clang-format style written for C and C++ projects.")
+
+(defconst init/c-default-compile-flags
+  '("-Wall"
+    "-Wextra"
+    "-Isrc"
+    "-Ibuild/tcc")
+  "Default clangd flags written for small C and C++ projects.")
+
+(defun init/c-project-root ()
+  "Return the root for the current C or C++ project."
+  (or (and buffer-file-name (init/git-repo-root buffer-file-name))
+      (init/project-root-for '("compile_commands.json"
+                               "compile_flags.txt"
+                               "CMakeLists.txt"
+                               "Makefile"
+                               "meson.build"
+                               "configure.ac"
+                               "configure"))))
+
+(defun init/c-ensure-clang-format ()
+  "Create a default .clang-format at the C or C++ project root when absent."
+  (when (and init/c-auto-create-clang-format buffer-file-name)
+    (let* ((root (file-name-as-directory (expand-file-name (init/c-project-root))))
+           (style-file (expand-file-name ".clang-format" root)))
+      (unless (or (locate-dominating-file buffer-file-name ".clang-format")
+                  (file-exists-p style-file))
+        (make-directory root t)
+        (init/atomic-write-file
+         style-file
+         (lambda (temporary)
+           (with-temp-file temporary
+             (insert init/c-default-clang-format))))))))
+
+(defun init/c-ensure-compile-flags ()
+  "Create compile_flags.txt at the C or C++ project root when no compile DB exists."
+  (when (and init/c-auto-create-compile-flags buffer-file-name)
+    (let* ((root (file-name-as-directory (expand-file-name (init/c-project-root))))
+           (compile-db (expand-file-name "compile_commands.json" root))
+           (flags-file (expand-file-name "compile_flags.txt" root)))
+      (unless (or (file-exists-p compile-db) (file-exists-p flags-file))
+        (make-directory root t)
+        (init/atomic-write-file
+         flags-file
+         (lambda (temporary)
+           (with-temp-file temporary
+             (dolist (flag init/c-default-compile-flags)
+               (insert flag "\n")))))))))
+
+(defun init/c-format-buffer ()
+  "Format the current C or C++ buffer with clang-format and project style."
+  (interactive)
+  (unless buffer-file-name
+    (user-error "This buffer is not visiting a file"))
+  (unless (executable-find "clang-format")
+    (user-error "clang-format not found in PATH"))
+  (init/c-ensure-clang-format)
+  (let ((output (generate-new-buffer " *clang-format output*")))
+    (unwind-protect
+        (let ((status (call-process-region
+                       (point-min) (point-max) "clang-format" nil
+                       output nil
+                       "--style=file"
+                       (concat "--assume-filename=" buffer-file-name))))
+          (unless (zerop status)
+            (with-current-buffer output
+              (user-error "clang-format failed: %s" (string-trim (buffer-string)))))
+          (replace-buffer-contents output))
+      (kill-buffer output))))
 
 (defun init/c-setup ()
   "Set up C and C++ editing, LSP and diagnostics in the current buffer."
@@ -38,9 +124,13 @@
               indent-tabs-mode nil)
   (when (boundp 'c-ts-mode-indent-offset)
     (setq-local c-ts-mode-indent-offset 4))
-  (init/ide-start-eglot "clangd" "Install clangd for C LSP support.")
+  (init/c-ensure-clang-format)
+  (init/c-ensure-compile-flags)
+  (init/ide-start-eglot (car init/clangd-command)
+                        "Install clangd for C LSP support.")
   (init/ide-prefer-flycheck)
-  (init/ide-format-with-eglot-on-save)
+  (add-hook 'before-save-hook #'init/c-format-buffer nil t)
+  (setq-local init/ide-format-function #'init/c-format-buffer)
   (init/ide-mode 1))
 
 (use-package cc-mode

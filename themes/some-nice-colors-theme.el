@@ -51,7 +51,7 @@
    `(font-lock-constant-face ((t (:foreground ,teal))))
    `(font-lock-doc-face ((t (:foreground "#a89283"))))
    `(font-lock-function-name-face ((t (:foreground ,rose :weight semi-bold))))
-   `(init/owl-function-name-face ((t (:foreground ,sage :weight bold))))
+   `(owl-function-name-face ((t (:foreground ,sage :weight bold))))
    `(font-lock-keyword-face ((t (:foreground ,sage :weight semi-bold))))
    `(font-lock-string-face ((t (:foreground ,peach))))
    `(font-lock-type-face ((t (:foreground ,gold))))

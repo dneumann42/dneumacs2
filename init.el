@@ -62,7 +62,7 @@
 (require 'init-lang-jvm)
 (require 'init-lang-lisp)
 (require 'init-lang-nim)
-(require 'init-lang-dsl)
+(require 'init-owl)
 
 ;;;; Guides
 

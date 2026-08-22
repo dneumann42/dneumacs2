@@ -12,10 +12,7 @@
 ;; Sessions are per project: switching projects loads that project's
 ;; window and buffer layout when one has been saved, and starts a fresh
 ;; session otherwise.  Sessions auto-save, so a restart lands you back
-;; where you were -- unless a file or directory was named on the command
-;; line, which is a request to look at that path rather than to resume.  A
-;; session records the buffers that were on screen and nothing else -- see
-;; the Sessions section below for why.
+;; where you were.
 ;;
 ;; The project panel is a side window over a small registry of git
 ;; remotes (the `repos' file in this directory, one SSH URL per line).
@@ -30,17 +27,13 @@
 (require 'transient)
 (require 'init-keys)
 (require 'init-lib)
-(require 'init-persist)
 
 (declare-function consult-ripgrep "consult")
 (declare-function easysession-get-session-file-path "easysession")
 (declare-function easysession-get-session-name "easysession")
 (declare-function easysession-reset "easysession")
 (declare-function easysession-save "easysession")
-(declare-function easysession-set-current-session-name "easysession")
 (declare-function easysession-switch-to "easysession")
-(declare-function easysession-visible-buffer-list "easysession")
-(defvar easysession-visible-buffer-list-include-names)
 (declare-function projectile-add-known-project "projectile")
 (declare-function projectile-find-file "projectile")
 (declare-function projectile-remove-known-project "projectile")
@@ -56,13 +49,6 @@
   :bind-keymap (("C-x p" . projectile-command-map)
                 ("C-c p" . projectile-command-map)
                 ("s-p"   . projectile-command-map))
-  :custom
-  ;; `projectile--dir-files-alien-await' busy-waits on a flag that only its
-  ;; process sentinel sets, and the sentinel skips it on any error -- a
-  ;; killed output buffer is enough -- so the wait then spins at 100% CPU
-  ;; forever on "Projectile is indexing ...".  The synchronous indexer it
-  ;; replaces takes 40ms on a 15k-file repository, so this buys nothing here.
-  (projectile-async-indexing nil)
   :config
   (projectile-mode +1))
 
@@ -127,152 +113,82 @@ you kill it, and `g' re-runs the same search."
 
 ;;;; Sessions
 
-;; A session persists the buffers that were on screen, not every buffer
-;; that happened to be alive.  Restoring a file buffer runs its major
-;; mode, tree-sitter, the fringe and colour overlays, a Git diff, and for
-;; code a language server, so the cost is linear in buffers restored and a
-;; session that has drifted up to thirty of them costs seconds.  The
-;; window layout is the part worth restoring; the rest is one keypress
-;; away through recentf and `consult-buffer'.
-;;
-;; To go back to persisting every live buffer, set
-;; `easysession-buffer-list-function' to `buffer-list'.
+(defconst init/session-rename-rewrites
+  `((,(expand-file-name "~/.workspace/nest/src/nest/crowdsl.nim")
+     . ,(expand-file-name "~/.workspace/nest/src/nest/owldsl.nim"))
+    ("~/.workspace/nest/src/nest/crowdsl.nim"
+     . "~/.workspace/nest/src/nest/owldsl.nim")
+    (,(expand-file-name "~/.workspace/nest/tests/test_crowdsl.nim")
+     . ,(expand-file-name "~/.workspace/nest/tests/test_owldsl.nim"))
+    ("~/.workspace/nest/tests/test_crowdsl.nim"
+     . "~/.workspace/nest/tests/test_owldsl.nim")
+    ("crowdsl.nim" . "owldsl.nim")
+    ("test_crowdsl.nim" . "test_owldsl.nim")
+    ("init-lang-dsl.el" . "init-owl.el")
+    (,(expand-file-name "~/.workspace/crow/src/crow.nim")
+     . ,(expand-file-name "~/.workspace/owl/src/owl.nim"))
+    ("~/.workspace/crow/src/crow.nim"
+     . "~/.workspace/owl/src/owl.nim")
+    (,(expand-file-name "~/.workspace/crow/src/crow/")
+     . ,(expand-file-name "~/.workspace/owl/src/owl/"))
+    ("~/.workspace/crow/src/crow/"
+     . "~/.workspace/owl/src/owl/")
+    (,(expand-file-name "~/.workspace/crow/")
+     . ,(expand-file-name "~/.workspace/owl/"))
+    ("~/.workspace/crow/" . "~/.workspace/owl/"))
+  "Literal text rewrites for saved state from the crow to owl rename.")
 
-(defconst init/session-max-file-size (* 2 1024 1024)
-  "Largest file, in bytes, a session will record.")
+(defun init/session-rewrite-text (text)
+  "Return TEXT with stale crow/nest session references rewritten."
+  (let ((rewritten text))
+    (dolist (rewrite init/session-rename-rewrites)
+      (setq rewritten
+            (string-replace (car rewrite) (cdr rewrite) rewritten)))
+    (setq rewritten
+          (replace-regexp-in-string
+           "\\(\\(?:~\\|/home/dneumann\\)/\\.workspace/\\(?:nest\\|owl\\)/\\(?:[^\"[:space:])#/]+/\\)*[^\"[:space:])#/.]+\\)\\.nest\\>"
+           "\\1.owl"
+           rewritten
+           nil nil))
+    (setq rewritten
+          (replace-regexp-in-string
+           "\\(#!home!dneumann!\\.workspace!\\(?:nest\\|owl\\)!\\(?:[^\"[:space:])#!]+!\\)*[^\"[:space:])#!.]+\\)\\.nest#"
+           "\\1.owl#"
+           rewritten
+           nil nil))
+    (replace-regexp-in-string "\\_<crow\\([.-]\\|dsl\\)" "owl\\1"
+                              rewritten nil nil)))
 
-(defun init/session-cheap-to-restore-p (buffer)
-  "Return non-nil when restoring BUFFER at startup is cheap.
-Remote files are rejected: reopening one makes TRAMP connect while Emacs
-is still starting, which blocks until the host answers or times out.
-Files above `init/session-max-file-size' are rejected too.  Buffers not
-visiting a file cost nothing to recreate and are always kept."
-  (let ((file (buffer-local-value 'buffer-file-name buffer)))
-    (or (null file)
-        (and (not (file-remote-p file))
-             (let ((size (file-attribute-size (file-attributes file))))
-               (or (null size) (< size init/session-max-file-size)))))))
+(defun init/session-rewrite-file (file)
+  "Rewrite stale crow/nest references in saved state FILE."
+  (when (and (file-regular-p file)
+             (file-readable-p file)
+             (file-writable-p file))
+    (with-temp-buffer
+      (insert-file-contents file)
+      (let* ((old (buffer-string))
+             (new (init/session-rewrite-text old)))
+        (unless (string= old new)
+          (init/atomic-write-file
+           file
+           (lambda (temporary)
+             (with-temp-file temporary
+               (insert new)))))))))
 
-(defun init/session-buffer-list ()
-  "Return the buffers a session should record: the ones on screen.
-This is `easysession-visible-buffer-list' -- buffers shown in a window or
-carried by a tab, plus *scratch* -- narrowed to those that are cheap to
-restore."
-  (seq-filter #'init/session-cheap-to-restore-p
-              (easysession-visible-buffer-list)))
-
-(defun init/session-exists-p (name)
-  "Return non-nil when a session called NAME has been saved."
-  (file-exists-p (easysession-get-session-file-path name)))
-
-;; `emacs some/file' or `emacs some/dir' asks to look at that path, not to
-;; resume yesterday's work: `command-line-1' visits the path just before
-;; `emacs-startup-hook' runs, so restoring a session there would bury it
-;; under the saved window layout.  The restore is skipped instead, and the
-;; session name is pointed at a throwaway -- the auto-save, and the save
-;; `easysession-switch-to' makes before switching away, would otherwise
-;; overwrite a real session with this ad-hoc state.
-
-(defconst init/session-command-line-name "command line"
-  "Session name used when a path is named on the Emacs command line.
-A throwaway: it is never restored, and never becomes the session reopened
-at the next startup.")
-
-(defun init/session--option-argument-count (option)
-  "Return how many arguments OPTION consumes on the Emacs command line.
-The window-system options come from the alists Emacs itself consults; the
-rest are the core options `command-line-1' reads an argument for, whose
-argument would otherwise be mistaken for a file to visit."
-  (cond
-   ((member option '("-L" "--directory" "-l" "--load" "-f" "--funcall"
-                     "--eval" "--execute" "--insert" "--chdir" "-u" "--user"
-                     "--script" "--init-directory" "--dump-file" "--seccomp"
-                     "-t" "--terminal" "--color"))
-    1)
-   ((cadr (assoc option command-line-x-option-alist)))
-   ((cadr (assoc option command-line-ns-option-alist)))
-   (t 0)))
-
-(defun init/session-command-line-paths ()
-  "Return the files and directories named on the Emacs command line.
-This mirrors what `command-line-1' will treat as a file: an argument that
-is not an option and was not consumed by one.  Option arguments -- the
-FILE in `-l FILE', the colour in `-fg COLOUR' -- are stepped over, and a
-path that does not exist yet still counts, since `emacs notes.md' on a new
-file is as much a request to edit it as on an old one."
-  (let ((arguments (cdr command-line-args))
-        (paths nil))
-    (while arguments
-      (let ((argument (pop arguments)))
-        (cond
-         ;; Everything after the magic `--' is a file name, dash or not.
-         ((equal argument "--")
-          (setq paths (append (reverse arguments) paths)
-                arguments nil))
-         ;; An option.  The `--option=value' form carries its own argument.
-         ((string-prefix-p "-" argument)
-          (unless (string-search "=" argument)
-            (setq arguments (nthcdr (init/session--option-argument-count argument)
-                                    arguments))))
-         ;; `+LINE' and `+LINE:COLUMN' position the file that follows.
-         ((string-match-p "\\`\\+[0-9]+\\(:[0-9]+\\)?\\'" argument))
-         (t
-          (push argument paths)))))
-    (nreverse paths)))
-
-(defvar init/session-startup-paths (init/session-command-line-paths)
-  "Files and directories named on the command line Emacs was started with.
-Computed as this module loads, which is before `command-line-1' visits
-them and before easysession decides whether to restore a session.")
-
-(defun init/session-command-line-start-p ()
-  "Return non-nil when this Emacs was started to look at a path.
-Nil under a daemon: its frames outlive the command line that started it,
-so `server-after-make-frame-hook' should go on restoring the session."
-  (and init/session-startup-paths (not (daemonp))))
-
-(defun init/session-restore-p ()
-  "Return non-nil when the previous session should be restored at startup.
-Runs as `easysession-setup-load-predicate'."
-  (not (init/session-command-line-start-p)))
-
-;; easysession keeps the current session name in memory only, so
-;; `easysession-load' falls back to "main" on every start, whatever project
-;; you were last in.  The name goes in the init-persist store instead, and
-;; is handed back to easysession before its startup hook reads it.
-
-(defvar init/session-last-name nil
-  "Name of the session to reopen at startup.
-Nil, or a name with no saved session, leaves easysession its own default.
-Restored by `init/persist-load' before this module loads.")
-
-(init/persist-register 'init/session-last-name)
-
-(defun init/session-remember-name (&rest _)
-  "Record the current session as the one to reopen at startup.
-Runs from the session load and save hooks, whose arguments are not needed
-here."
-  (when-let ((name (easysession-get-session-name)))
-    (unless (or (equal name init/session-last-name)
-                ;; The throwaway session must never be the one reopened.
-                (equal name init/session-command-line-name))
-      (init/persist-set 'init/session-last-name name))))
-
-(defun init/session-restore-last-name ()
-  "Choose the session name easysession starts out in.
-Normally the one recorded in `init/session-last-name'.  When a path was
-named on the command line nothing is restored, so the name points at
-`init/session-command-line-name' and this session's saves land in the
-throwaway rather than over the layout you left behind."
-  (cond
-   ((init/session-command-line-start-p)
-    (easysession-set-current-session-name init/session-command-line-name))
-   ((and init/session-last-name
-         (init/session-exists-p init/session-last-name))
-    (easysession-set-current-session-name init/session-last-name))))
-
-(add-hook 'easysession-after-load-hook #'init/session-remember-name)
-(add-hook 'easysession-after-save-hook #'init/session-remember-name)
+(defun init/session-rewrite-renamed-paths ()
+  "Rewrite saved Emacs state from the crow/nest names to owl names."
+  (let* ((state-files (delq nil
+                            (list (expand-file-name "recentf" user-emacs-directory)
+                                  (expand-file-name "places" user-emacs-directory)
+                                  (expand-file-name "history" user-emacs-directory))))
+         (session-dir (expand-file-name "easysession" user-emacs-directory))
+         (auto-save-list-dir (expand-file-name "auto-save-list" user-emacs-directory)))
+    (dolist (file (append state-files
+                          (when (file-directory-p session-dir)
+                            (directory-files session-dir t "\\`[^.]"))
+                          (when (file-directory-p auto-save-list-dir)
+                            (directory-files auto-save-list-dir t "\\`\\.saves-"))))
+      (init/session-rewrite-file file))))
 
 (use-package easysession
   :ensure t
@@ -283,53 +199,11 @@ throwaway rather than over the layout you left behind."
   (easysession-mode-line-misc-info t)
   ;; Project sessions are created programmatically; never prompt about it.
   (easysession-confirm-new-session nil)
-  (easysession-buffer-list-function #'init/session-buffer-list)
-  ;; Started on a path?  Then the command line, not the session, decides
-  ;; what is on screen.
-  (easysession-setup-load-predicate #'init/session-restore-p)
   :config
-  ;; *scratch* holds work in progress even when no window shows it.
-  (add-to-list 'easysession-visible-buffer-list-include-names "*scratch*")
-  ;; Before `easysession-setup': it only queues the load on a startup hook,
-  ;; which reads the name this sets.
-  (init/session-restore-last-name)
+  (init/session-rewrite-renamed-paths)
   ;; Restore the previous session, frame geometry included, and turn on
   ;; the auto-save mode.
   (easysession-setup))
-
-;; Reported so a slow startup can be attributed rather than guessed at.
-(defvar init/session--load-started nil
-  "Time the session currently being loaded started restoring.")
-
-(defun init/session--note-load-start ()
-  "Record when the session load began."
-  (setq init/session--load-started (current-time)))
-
-(defun init/session--report-load-time ()
-  "Report how long restoring the session took, and the startup total."
-  (when init/session--load-started
-    (let ((elapsed (float-time (time-since init/session--load-started))))
-      (setq init/session--load-started nil)
-      (message "Session '%s' restored in %.2fs: %d buffer(s) on screen (startup %s)"
-               (easysession-get-session-name)
-               elapsed
-               (length (init/session-buffer-list))
-               (emacs-init-time)))))
-
-(add-hook 'easysession-before-load-hook #'init/session--note-load-start)
-(add-hook 'easysession-after-load-hook #'init/session--report-load-time)
-
-(defun init/session--report-command-line-start ()
-  "Say that the command line, not a session, decided what is on screen."
-  (when (init/session-command-line-start-p)
-    (message "Opened %s from the command line; session not restored (startup %s)"
-             (string-join (mapcar #'abbreviate-file-name init/session-startup-paths)
-                          ", ")
-             (emacs-init-time))))
-
-;; After `easysession-setup-add-hook-depth', so the message is the last
-;; thing said about startup rather than the first.
-(add-hook 'emacs-startup-hook #'init/session--report-command-line-start 103)
 
 ;; Keep the *scratch* buffer's contents across restarts.  easysession is
 ;; configured never to kill it, so it follows you between sessions too.
@@ -337,6 +211,10 @@ throwaway rather than over the layout you left behind."
   :ensure t
   :config
   (persistent-scratch-setup-default))
+
+(defun init/session-exists-p (name)
+  "Return non-nil when a session called NAME has been saved."
+  (file-exists-p (easysession-get-session-file-path name)))
 
 (defun init/session-new (name)
   "Save the current session and start a fresh, empty session called NAME.
@@ -372,11 +250,6 @@ alone; everything else is closed."
   (concat "project: "
           (file-name-nondirectory (directory-file-name (expand-file-name root)))))
 
-(defun init/session-showing-a-file-p ()
-  "Return non-nil when a window in the selected frame shows a file buffer."
-  (seq-some (lambda (window) (buffer-file-name (window-buffer window)))
-            (window-list)))
-
 (defun init/session-projectile-switch-action ()
   "Open the selected project through its session.
 Runs as `projectile-switch-project-action', with `default-directory' set
@@ -391,14 +264,7 @@ find-file."
      ((equal name (easysession-get-session-name))
       (projectile-find-file))
      ((init/session-exists-p name)
-      (easysession-switch-to name)
-      ;; A session can restore no files at all -- it was saved with only
-      ;; Treemacs and *scratch* up, or an interrupted switch left it empty --
-      ;; which would otherwise land you on *scratch* with no way into the
-      ;; project.
-      (unless (init/session-showing-a-file-p)
-        (let ((default-directory root))
-          (projectile-find-file))))
+      (easysession-switch-to name))
      (t
       (easysession-switch-to name)
       (easysession-reset)
