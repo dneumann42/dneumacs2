@@ -52,6 +52,8 @@
 (defvar org-directory)
 (defvar org-log-done)
 (defvar org-mode-map)
+(defvar org-src-block-faces)
+(defvar org-src-fontify-natively)
 (defvar org-todo-log-states)
 
 ;;;; Prose typography
@@ -67,6 +69,9 @@
 
 (defvar-local init/org--fixed-pitch-font-remap nil
   "Face-remap cookie for scaled fixed-pitch regions in Org buffers.")
+
+(defvar-local init/org--source-font-lock-remaps nil
+  "Face-remap cookies keeping source block syntax faces fixed-pitch.")
 
 (defun init/org--text-scale-factor ()
   "Return the current buffer's text scale multiplier."
@@ -111,6 +116,18 @@ in the `org' :config block."
   "Soft-wrap Org prose at the window edge, on word boundaries."
   (visual-line-mode 1))
 
+(defun init/org-default-directory-setup ()
+  "Keep Org file prompts anchored in `org-directory'.
+This also covers Org popup buffers, which otherwise inherit whatever
+temporary directory was current when they were created."
+  (when (and (boundp 'org-directory)
+             org-directory
+             (file-directory-p org-directory)
+             (or (not buffer-file-name)
+                 (file-in-directory-p buffer-file-name org-directory)))
+    (setq-local default-directory
+                (file-name-as-directory (expand-file-name org-directory)))))
+
 (defun init/org-set-heading-faces ()
   "Set the font scale for Org document titles and heading levels."
   (set-face-attribute 'org-document-title nil :height 1.8 :weight 'bold)
@@ -128,6 +145,7 @@ in the `org' :config block."
 
 (defconst init/org-fixed-pitch-faces
   '((org-block . fixed-pitch)
+    (org-inline-src-block . fixed-pitch)
     (org-table . fixed-pitch)
     (org-checkbox . fixed-pitch)
     (org-formula . fixed-pitch)
@@ -140,10 +158,55 @@ in the `org' :config block."
   "Org faces kept monospaced under `variable-pitch-mode'.
 Source blocks, tables and metadata only line up in a fixed-pitch font.")
 
-(defun init/org-set-fixed-pitch-faces ()
+(defconst init/org-source-font-lock-faces
+  '(font-lock-builtin-face
+    font-lock-comment-face
+    font-lock-comment-delimiter-face
+    font-lock-constant-face
+    font-lock-doc-face
+    font-lock-doc-markup-face
+    font-lock-function-call-face
+    font-lock-function-name-face
+    font-lock-keyword-face
+    font-lock-negation-char-face
+    font-lock-number-face
+    font-lock-operator-face
+    font-lock-preprocessor-face
+    font-lock-property-name-face
+    font-lock-property-use-face
+    font-lock-punctuation-face
+    font-lock-regexp-grouping-backslash
+    font-lock-regexp-grouping-construct
+    font-lock-string-face
+    font-lock-type-face
+    font-lock-variable-name-face
+    font-lock-variable-use-face
+    font-lock-warning-face)
+  "Syntax faces remapped to fixed-pitch inside Org buffers.")
+
+(defun init/org-set-fixed-pitch-faces (&rest _)
   "Keep the technical parts of Org buffers monospaced."
   (dolist (spec init/org-fixed-pitch-faces)
     (set-face-attribute (car spec) nil :inherit (cdr spec))))
+
+(defun init/org--remap-source-font-lock-faces ()
+  "Keep natively fontified source-block faces monospaced in this Org buffer."
+  (mapc #'face-remap-remove-relative init/org--source-font-lock-remaps)
+  (setq init/org--source-font-lock-remaps
+        (delq nil
+              (mapcar (lambda (face)
+                        (when (facep face)
+                          (face-remap-add-relative face 'fixed-pitch)))
+                      init/org-source-font-lock-faces))))
+
+(defun init/org-source-block-display-setup ()
+  "Keep Org source blocks monospaced and fully fontified."
+  (setq-local org-src-fontify-natively t
+              org-src-block-faces '((".*" (:inherit fixed-pitch)))
+              jit-lock-chunk-size nil)
+  (init/org--remap-source-font-lock-faces)
+  (font-lock-flush)
+  (font-lock-ensure))
 
 ;;;; Striped tables
 
@@ -527,7 +590,9 @@ BUFFER and POSITION are where the mouse now points."
   :ensure nil
   :hook ((org-mode . init/org-enable-parent-cookie-tracking)
          (org-mode . init/org-writer-font-setup)
+         (org-mode . init/org-default-directory-setup)
          (org-mode . init/org-line-wrap-setup)
+         (org-mode . init/org-source-block-display-setup)
          (org-mode . init/org-enable-reference-popups))
   :bind (("C-c a" . org-agenda)
          ("C-c c" . org-capture)
@@ -555,7 +620,7 @@ BUFFER and POSITION are where the mouse now points."
   (org-agenda-span 'week)
   ;; Prose-friendly display; org-modern draws the decorations.
   (org-hide-emphasis-markers t)
-  (org-hide-leading-stars t)
+  (org-hide-leading-stars nil)
   (org-pretty-entities t)
   (org-ellipsis "…")
   ;; Tags are floated by `init/org--tag-float', not padded with spaces:
@@ -583,6 +648,7 @@ BUFFER and POSITION are where the mouse now points."
   (require 'org-agenda)
   (init/org-set-heading-faces)
   (init/org-set-fixed-pitch-faces)
+  (add-hook 'enable-theme-functions #'init/org-set-fixed-pitch-faces)
   (set-face-attribute 'org-level-1 nil :underline t)
   (font-lock-add-keywords
    'org-mode
@@ -857,7 +923,7 @@ theme or font needs a refontification."
   :hook ((org-mode . org-modern-mode)
          (org-agenda-finalize . org-modern-agenda))
   :custom
-  (org-modern-star 'replace)
+  (org-modern-star nil)
   (org-modern-replace-stars "◉○✸✿◆◇▶▷")
   (org-modern-table t)
   (org-modern-keyword t)

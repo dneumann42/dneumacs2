@@ -2,13 +2,10 @@
 
 ;;; Commentary:
 
-;; Nim editing: project scaffolding, nimsuggest integration, Flycheck
-;; diagnostics shown in a hover popup, token-based motion commands, nph
-;; formatting, run and test helpers, and a browser for the installed
-;; toolchain's documentation.
-;;
-;; Nim is the one language here that does not use Eglot.  nimsuggest is
-;; queried directly, so most `init/ide-*' actions are overridden.
+;; Nim editing: project scaffolding, Nim Tortoise/Eglot integration,
+;; nimsuggest fallback helpers, Flycheck diagnostics, token-based motion
+;; commands, nph formatting, run and test helpers, and a browser for the
+;; installed toolchain's documentation.
 ;;
 ;; The documentation browser reads the tab-separated .idx index files Nim
 ;; generates next to every module.html, so search results carry the exact
@@ -25,6 +22,7 @@
 (require 'init-lib)
 
 (declare-function eww "eww" (url &optional new-buffer))
+(declare-function eglot-ensure "eglot")
 (declare-function flycheck-buffer "flycheck")
 (declare-function flycheck-error-buffer "flycheck")
 (declare-function flycheck-error-checker "flycheck")
@@ -39,6 +37,9 @@
 (declare-function flycheck-list-errors "flycheck")
 (declare-function flycheck-overlay-errors-at "flycheck")
 (declare-function nim-mode "nim-mode")
+(declare-function nim-indent-post-self-insert-function "nim-mode")
+(declare-function nim-indent-shift-left "nim-helper")
+(declare-function nim-indent-shift-right "nim-helper")
 (declare-function nimsuggest-available-p "nim-suggest")
 (declare-function nimsuggest-mode "nim-suggest")
 (declare-function nimsuggest-show-doc "nim-suggest")
@@ -49,6 +50,64 @@
 (defvar nim-mode-map)
 (defvar nimsuggest-local-options)
 (defvar nimsuggest-path)
+(defvar eglot-workspace-configuration)
+
+;;;; Indentation-sensitive editing
+
+(defun init/nim--current-line-indent ()
+  "Return the visible indentation of the current Nim line."
+  (save-excursion
+    (back-to-indentation)
+    (current-column)))
+
+(defun init/nim-newline (&optional count)
+  "Insert COUNT newlines in Nim without reindenting surrounding code.
+Nim's indentation is semantic, so RET preserves the current line's
+indentation and leaves the line below point untouched.  Use TAB when an
+explicit recalculation is wanted."
+  (interactive "p")
+  (let ((indent (init/nim--current-line-indent))
+        (electric-indent-inhibit t)
+        (post-self-insert-hook
+         (remove #'nim-indent-post-self-insert-function post-self-insert-hook)))
+    (dotimes (_ (or count 1))
+      (newline)
+      (indent-to indent))))
+
+(defun init/nim-open-line-below ()
+  "Open a same-indentation Nim line below the current line."
+  (interactive)
+  (end-of-line)
+  (init/nim-newline))
+
+(defun init/nim-open-line-above ()
+  "Open a same-indentation Nim line above the current line."
+  (interactive)
+  (let ((indent (init/nim--current-line-indent)))
+    (beginning-of-line)
+    (insert "\n")
+    (forward-line -1)
+    (indent-to indent)))
+
+(defun init/nim-backspace (arg)
+  "Delete backward in Nim, dedenting by one level in leading whitespace.
+ARG is passed through to `backward-delete-char-untabify' outside
+indentation."
+  (interactive "*p")
+  (if (and (not current-prefix-arg)
+           (= (current-column) (current-indentation))
+           (> (current-indentation) 0))
+      (indent-line-to (max 0 (- (current-indentation) nim-indent-offset)))
+    (backward-delete-char-untabify arg)))
+
+(defun init/nim-editing-setup ()
+  "Make Nim editing conservative around semantic indentation."
+  (when (fboundp 'electric-indent-local-mode)
+    (electric-indent-local-mode -1))
+  (setq-local electric-indent-inhibit t
+              electric-indent-chars nil)
+  (remove-hook 'post-self-insert-hook
+               #'nim-indent-post-self-insert-function t))
 
 ;;;; Toolchain paths and project layout
 
@@ -64,6 +123,153 @@
   (init/prepend-to-path init/nim-local-bin))
 
 (init/nim--ensure-nimble-path)
+
+(defcustom init/nim-tortoise-version "v0.2.1"
+  "Version tag of Nim Tortoise to install and use."
+  :type 'string
+  :group 'init/lsp)
+
+(defcustom init/nim-tortoise-repository
+  "https://github.com/music-theories/nimtortoise.git"
+  "Git repository used to install Nim Tortoise."
+  :type 'string
+  :group 'init/lsp)
+
+(defcustom init/nim-tortoise-install-directory
+  (expand-file-name "lsp-servers/nimtortoise" user-emacs-directory)
+  "Directory where versioned Nim Tortoise builds are installed."
+  :type 'directory
+  :group 'init/lsp)
+
+(defcustom init/nim-tortoise-performance "HIGH"
+  "Nim Tortoise performance mode.
+Valid values are HIGHEST, HIGH, LOW and LOWEST.  Upstream defaults to HIGH."
+  :type '(choice (const "HIGHEST")
+                 (const "HIGH")
+                 (const "LOW")
+                 (const "LOWEST"))
+  :group 'init/lsp)
+
+(defcustom init/nim-tortoise-max-nimsuggest-processes 2
+  "Maximum nimsuggest processes Nim Tortoise may run.
+Use 0 for no limit."
+  :type 'integer
+  :group 'init/lsp)
+
+(defvar init/nim-tortoise--install-declined nil
+  "Non-nil when Nim Tortoise installation was declined this session.")
+
+(defcustom init/nim-use-lsp t
+  "When non-nil, use Nim Tortoise through Eglot for Nim buffers.
+When Nim Tortoise is unavailable or installation is declined, the older
+nimsuggest/Flycheck setup is used instead."
+  :type 'boolean
+  :group 'init/lsp)
+
+(defcustom init/nim-format-on-save nil
+  "When non-nil, format Nim buffers with nph before saving.
+nph is still prerelease and currently reports parser failures for valid Nim
+constructs, so automatic formatting is disabled by default.  Manual
+formatting through `init/ide-format' remains available."
+  :type 'boolean
+  :group 'init/lsp)
+
+(defun init/nim-tortoise-executable ()
+  "Return the expected path of the installed Nim Tortoise executable."
+  (expand-file-name
+   "nimtortoise"
+   (expand-file-name init/nim-tortoise-version
+                     init/nim-tortoise-install-directory)))
+
+(defun init/nim--lsp-command (&optional _interactive _project)
+  "Return the command list used to start the Nim LSP server."
+  (list (init/nim-tortoise-executable)))
+
+(defun init/nim-tortoise-workspace-configuration ()
+  "Return Nim Tortoise settings for Eglot."
+  (let ((nimtortoise (init/nim-tortoise-executable)))
+    `(:nimTortoise
+      (:transportMode "stdio"
+       :lsp (:path ,(if (file-executable-p nimtortoise) nimtortoise ""))
+       :performance ,init/nim-tortoise-performance
+       :formatOnSave ,init/nim-format-on-save
+       :nimsuggestPath ,(or (executable-find "nimsuggest") "nimsuggest")
+       :maxNimsuggestProcesses ,init/nim-tortoise-max-nimsuggest-processes))))
+
+(defun init/nim-tortoise--log-buffer ()
+  "Return the Nim Tortoise installer log buffer."
+  (get-buffer-create "*Nim Tortoise install*"))
+
+(defun init/nim-tortoise--run (directory program &rest args)
+  "Run PROGRAM with ARGS in DIRECTORY, appending output to the installer log."
+  (with-current-buffer (init/nim-tortoise--log-buffer)
+    (let ((default-directory directory))
+      (goto-char (point-max))
+      (insert "\n$ " (mapconcat #'identity (cons program args) " ") "\n")
+      (let ((status (apply #'process-file program nil t t args)))
+        (unless (zerop status)
+          (display-buffer (current-buffer)))
+        status))))
+
+(defun init/nim-tortoise-install ()
+  "Install the pinned Nim Tortoise language server from source."
+  (interactive)
+  (unless (executable-find "git")
+    (user-error "git is required to install Nim Tortoise"))
+  (unless (executable-find "nimble")
+    (user-error "nimble is required to build Nim Tortoise"))
+  (let* ((target (init/nim-tortoise-executable))
+         (target-dir (file-name-directory target))
+         (worktree (make-temp-file "nimtortoise-" t))
+         (source-binary (expand-file-name "langserver/bin/nimtortoise" worktree)))
+    (with-current-buffer (init/nim-tortoise--log-buffer)
+      (erase-buffer)
+      (insert (format "Installing Nim Tortoise %s\n" init/nim-tortoise-version)))
+    (unwind-protect
+        (progn
+          (unless
+              (zerop
+               (init/nim-tortoise--run
+                default-directory
+                "git" "clone" "--depth" "1" "--branch" init/nim-tortoise-version
+                init/nim-tortoise-repository worktree))
+            (user-error "Nim Tortoise clone failed; see *Nim Tortoise install*"))
+          (let ((default-directory (expand-file-name "langserver" worktree)))
+            (unless (zerop (init/nim-tortoise--run default-directory
+                                                   "nimble" "build"))
+              (user-error "Nim Tortoise build failed; see *Nim Tortoise install*")))
+          (unless (file-executable-p source-binary)
+            (user-error "Nim Tortoise build did not produce %s" source-binary))
+          (make-directory target-dir t)
+          (copy-file source-binary target t)
+          (set-file-modes target #o755)
+          (message "Installed Nim Tortoise %s to %s"
+                   init/nim-tortoise-version target)
+          target)
+      (when (file-directory-p worktree)
+        (delete-directory worktree t)))))
+
+(defun init/nim--ensure-tortoise ()
+  "Install Nim Tortoise after confirmation when the pinned binary is missing."
+  (let ((target (init/nim-tortoise-executable)))
+    (cond
+     ((file-executable-p target) target)
+     (init/nim-tortoise--install-declined nil)
+     ((y-or-n-p
+       (format "Install Nim Tortoise %s for Nim LSP now? "
+               init/nim-tortoise-version))
+      (condition-case err
+          (init/nim-tortoise-install)
+        (error
+         (display-warning 'nim (error-message-string err) :warning)
+         nil)))
+     (t
+      (setq init/nim-tortoise--install-declined t)
+      nil))))
+
+(with-eval-after-load 'eglot
+  (add-to-list 'eglot-server-programs
+               (cons 'nim-mode #'init/nim--lsp-command)))
 
 ;; nim-suggest requires nim-mode and the whole epc stack; loading it here
 ;; would drag all of that in at startup even when no Nim file is opened.
@@ -590,16 +796,44 @@ ALLOW-EXTEND is non-nil when called interactively."
 
 ;;;; Buffer setup
 
-(defun init/nim--warn-if-missing-tools ()
-  "Warn when the core Nim tools are not on the search path."
+(defun init/nim--warn-if-missing-tools (&optional use-lsp)
+  "Warn when the core Nim tools are not on the search path.
+When USE-LSP is non-nil, Nim Tortoise is responsible for nimsuggest."
   (unless (executable-find "nim")
     (display-warning
      'nim "nim not found in PATH; diagnostics and run commands will fail"
      :warning))
   (unless (executable-find "nimsuggest")
     (display-warning
-     'nim "nimsuggest not found in PATH; definition and hover will be limited"
+     'nim
+     (if use-lsp
+         "nimsuggest not found in PATH; Nim Tortoise requires it"
+       "nimsuggest not found in PATH; definition and hover will be limited")
      :warning)))
+
+(defun init/nim--lsp-available-p ()
+  "Return non-nil when Nim should use Nim Tortoise for this buffer."
+  (and init/nim-use-lsp
+       (or (file-executable-p (init/nim-tortoise-executable))
+           (init/nim--ensure-tortoise))))
+
+(defun init/nim--setup-lsp ()
+  "Start Nim Tortoise for the current Nim buffer."
+  (setq-local eglot-workspace-configuration
+              (init/nim-tortoise-workspace-configuration))
+  (init/ide-start-eglot (init/nim-tortoise-executable)
+                        "Install Nim Tortoise for Nim LSP support.")
+  (init/ide-prefer-flycheck))
+
+(defun init/nim--setup-nimsuggest ()
+  "Enable the direct nimsuggest/Flycheck fallback for this Nim buffer."
+  (init/nim--setup-diagnostics)
+  (init/nim--enable-nimsuggest)
+  (init/nim--prewarm-nimsuggest)
+  (setq-local init/ide-hover-function #'init/nim-hover-diagnostics
+              init/ide-diagnostics-function #'init/nim-show-diagnostics
+              init/ide-actions-function #'init/nim-symbol-actions
+              init/ide-goto-definition-function #'init/nim-goto-definition))
 
 (defun init/nim--setup-diagnostics ()
   "Set up Flycheck for the current Nim buffer, with hover popups."
@@ -617,25 +851,31 @@ ALLOW-EXTEND is non-nil when called interactively."
 (defun init/nim-setup ()
   "Set up Nim editing, diagnostics and navigation in the current buffer."
   (init/nim--ensure-project-scaffold)
-  (init/nim--warn-if-missing-tools)
-  (init/nim--setup-diagnostics)
-  (when (executable-find "nph")
+  (init/nim-editing-setup)
+  (let ((use-lsp (init/nim--lsp-available-p)))
+    (init/nim--warn-if-missing-tools use-lsp)
+    (if use-lsp
+        (init/nim--setup-lsp)
+      (init/nim--setup-nimsuggest)))
+  (when (and init/nim-format-on-save (executable-find "nph"))
     (add-hook 'before-save-hook #'init/nim-format-buffer nil t))
-  (init/nim--enable-nimsuggest)
-  (init/nim--prewarm-nimsuggest)
-  ;; Nim uses nimsuggest rather than Eglot, so it overrides most actions.
-  (setq-local init/ide-hover-function #'init/nim-hover-diagnostics
-              init/ide-diagnostics-function #'init/nim-show-diagnostics
-              init/ide-actions-function #'init/nim-symbol-actions
-              init/ide-format-function #'init/nim-format-buffer
+  (setq-local init/ide-format-function #'init/nim-format-buffer
               init/ide-run-function #'init/nim-run
-              init/ide-goto-definition-function #'init/nim-goto-definition)
+              init/ide-sync-function #'init/ide-reconnect)
   (init/ide-mode 1))
 
 (use-package nim-mode
   :mode ("\\.nim\\'" "\\.nims\\'" "\\.nimble\\'")
   :hook (nim-mode . init/nim-setup)
   :config
+  (define-key nim-mode-map (kbd "RET") #'init/nim-newline)
+  (define-key nim-mode-map (kbd "C-j") #'newline-and-indent)
+  (define-key nim-mode-map (kbd "DEL") #'init/nim-backspace)
+  (define-key nim-mode-map (kbd "C-S-<return>") #'init/nim-open-line-above)
+  (define-key nim-mode-map (kbd "C-<return>") #'init/nim-open-line-below)
+  (define-key nim-mode-map (kbd "<backtab>") #'nim-indent-shift-left)
+  (define-key nim-mode-map (kbd "C-c <") #'nim-indent-shift-left)
+  (define-key nim-mode-map (kbd "C-c >") #'nim-indent-shift-right)
   (define-key nim-mode-map (kbd bind/nim-mark-token) #'init/nim-mark-token)
   (define-key nim-mode-map (kbd bind/nim-doc-search) #'init/nim-doc-search)
   (define-key nim-mode-map (kbd bind/nim-doc-at-point) #'init/nim-doc-at-point)
