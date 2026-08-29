@@ -5,10 +5,10 @@
 ;; Everything that decides how Emacs looks before any buffer is drawn.
 ;;
 ;; Fonts: a shared discovery-and-installation flow (`init/font-ensure')
-;; that probes for a family, offers to download it into
-;; ~/.local/share/fonts once per session, and falls back gracefully.  Two
-;; fonts are configured with it -- Cascadia Code Nerd Font for the UI and
-;; EB Garamond for prose (Org and EWW).
+;; that probes for a family and falls back gracefully.  The UI font never
+;; prompts during startup; it can be installed explicitly with
+;; `init/install-cascadia-font'.  The prose font may be offered when a mode
+;; that uses it is first opened.
 ;;
 ;; Themes: the selected theme is remembered across sessions in the
 ;; init-persist store, so it is known before any module that reads face
@@ -62,15 +62,18 @@
 
 (defun init/font-reset-cache ()
   "Refresh the Emacs and system font caches after installing fonts."
-  (when (fboundp 'clear-font-cache)
-    (clear-font-cache))
-  (when (eq system-type 'gnu/linux)
-    (let ((status (call-process "fc-cache" nil nil nil "-f" "-r")))
+  (when (and (eq system-type 'gnu/linux) (executable-find "fc-cache"))
+    (let ((status (call-process "fc-cache" nil nil nil "-f")))
       (unless (and (integerp status) (zerop status))
-        (message "Font cache refresh failed with status %s" status)))))
+        (message "Font cache refresh failed with status %s" status))))
+  ;; Clear Emacs' view only after fontconfig has learned about the new files.
+  (when (fboundp 'clear-font-cache)
+    (clear-font-cache)))
 
 (defun init/font--download (url target)
   "Download URL atomically to TARGET using curl."
+  (unless (executable-find "curl")
+    (user-error "curl is required to download fonts"))
   (init/atomic-write-file
    target
    (lambda (temporary)
@@ -88,16 +91,31 @@
   (init/font-reset-cache)
   t)
 
+(defun init/font--extract-zip (archive destination)
+  "Extract zip ARCHIVE into DESTINATION using an available system tool."
+  (let* ((unzip (executable-find "unzip"))
+         (bsdtar (executable-find "bsdtar"))
+         (status
+          (cond
+           (unzip
+            (call-process unzip nil nil nil "-oq" archive "-d" destination))
+           (bsdtar
+            (call-process bsdtar nil nil nil "-xf" archive "-C" destination))
+           (t
+            (user-error
+             "A zip extractor is required (install unzip or bsdtar)")))))
+    (unless (and (integerp status) (zerop status))
+      (error "Font archive extraction failed with status %s" status))))
+
 (defun init/font-install-zip (url archive-name)
   "Download the font archive at URL as ARCHIVE-NAME and extract it."
-  (let ((archive (expand-file-name archive-name temporary-file-directory)))
+  (let ((archive (make-temp-file "emacs-font-" nil
+                                 (concat "-" archive-name))))
     (unwind-protect
         (progn
           (init/font--download url archive)
           (make-directory init/font-directory t)
-          (unless (zerop (call-process "unzip" nil nil nil "-oq" archive
-                                       "-d" init/font-directory))
-            (error "Failed to extract font archive %s" archive-name))
+          (init/font--extract-zip archive init/font-directory)
           (init/font-reset-cache)
           t)
       (when (file-exists-p archive)
@@ -204,7 +222,11 @@ the family name to use, or nil."
   "Apply FAMILY as the default font for current and future frames.
 A font can be unusable this early -- before the first graphical frame
 exists -- so a failed attempt is retried once from a timer."
-  (add-to-list 'default-frame-alist `(font . ,family))
+  ;; `set-face-attribute' with a nil FRAME updates all existing frames and the
+  ;; defaults inherited by new frames.  Do not also put a `font-spec' in
+  ;; `default-frame-alist': Emacs 31 rejects that value when posframe creates a
+  ;; child frame, which can make diagnostic popups repeatedly signal errors.
+  (setq default-frame-alist (assq-delete-all 'font default-frame-alist))
   (if (init/apply-font-family-now family)
       (setq init/pending-font-family nil
             init/font-apply-retried nil)
@@ -224,15 +246,13 @@ exists -- so a failed attempt is retried once from a timer."
   (init/font-install-zip init/cascadia-font-url "CascadiaCode.zip"))
 
 (defun init/ensure-default-font ()
-  "Use Cascadia as the UI font, offering to install it when it is missing."
-  (when-let ((family
+  "Use an installed Cascadia or Iosevka font for the UI.
+Do not prompt to download fonts during startup.  Cascadia can be installed
+explicitly with `init/install-cascadia-font'."
+  (when-let* ((family
               (init/font-ensure
                'cascadia
                :families init/cascadia-font-families
-               :file-patterns init/cascadia-font-files
-               :default-family init/cascadia-default-family
-               :prompt "Cascadia font is missing. Download and install it? "
-               :installer #'init/install-cascadia-font
                :fallback-families init/iosevka-font-families)))
     (init/apply-font-family family)))
 
@@ -663,7 +683,7 @@ With prefix argument REFRESH-PACKAGES, refresh package metadata first."
   "Start polling Wallust's theme file, if it is not already watched."
   (unless (timerp init/wallust-theme-watch-timer)
     (setq init/wallust-theme-modification-time
-          (when-let ((attributes (file-attributes (init/wallust-theme-file))))
+          (when-let* ((attributes (file-attributes (init/wallust-theme-file))))
             (file-attribute-modification-time attributes)))
     (setq init/wallust-theme-watch-timer
           (run-with-timer 1 1 #'init/check-wallust-theme-file))))

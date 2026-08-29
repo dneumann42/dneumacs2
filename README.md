@@ -31,6 +31,7 @@ name. `init.el` lists them in load order and nothing else.
 | `init-completion` | Vertico, Corfu, Consult, Embark, YASnippet, which-key |
 | `init-bookmarks` | Visible per-file bookmarks (bm) |
 | `init-compile` | The run/build panel and per-project commands |
+| `init-ai` | gptel connected to the local servellm llama.cpp model |
 | `init-projects` | Projectile, Magit, search, the project panel, sessions |
 | `init-treemacs` | The file tree |
 | `init-docs` | PDF, EWW and Markdown |

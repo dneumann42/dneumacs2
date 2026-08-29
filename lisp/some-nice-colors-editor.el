@@ -334,7 +334,7 @@ numbers stay exact on a terminal frame with a small colour map."
 
 (defun init/some-nice-colors--canvas ()
   "Return the palette's background colour, or the frame's."
-  (or (when-let ((color (init/some-nice-colors--find 'bg)))
+  (or (when-let* ((color (init/some-nice-colors--find 'bg)))
         (init/some-nice-colors-color-value color))
       (face-attribute 'default :background nil t)))
 
@@ -399,7 +399,7 @@ numbers stay exact on a terminal frame with a small colour map."
   "Set palette NAME to COLOR, then save and preview when it is valid.
 REMEMBER non-nil records the previous palette, so
 `init/some-nice-colors-undo' can put it back."
-  (if-let ((hex (init/some-nice-colors--hex color))
+  (if-let* ((hex (init/some-nice-colors--hex color))
            (entry (init/some-nice-colors--find name)))
       (unless (equal hex (init/some-nice-colors-color-value entry))
         (when remember (init/some-nice-colors--remember))
@@ -610,7 +610,7 @@ being deleted, which `wid-edit' reports as overlapping fields."
 
 (defun init/some-nice-colors--goto-row (name)
   "Move point to the row of NAME when the buffer has one."
-  (when-let ((position (seq-find
+  (when-let* ((position (seq-find
                         (lambda (start)
                           (eq name (get-text-property
                                     start 'init/some-nice-colors-name)))
@@ -619,7 +619,7 @@ being deleted, which `wid-edit' reports as overlapping fields."
 
 (defun init/some-nice-colors--color-at-point ()
   "Return the palette entry point is on, or signal a `user-error'."
-  (or (when-let ((name (init/some-nice-colors--name-at-point)))
+  (or (when-let* ((name (init/some-nice-colors--name-at-point)))
         (init/some-nice-colors--find name))
       (user-error "Point is not on a colour row")))
 
@@ -640,14 +640,14 @@ being deleted, which `wid-edit' reports as overlapping fields."
 (defun init/some-nice-colors-next ()
   "Move point to the next colour row."
   (interactive)
-  (when-let ((position (seq-find (lambda (start) (> start (point)))
+  (when-let* ((position (seq-find (lambda (start) (> start (point)))
                                  (init/some-nice-colors--row-positions))))
     (goto-char position)))
 
 (defun init/some-nice-colors-previous ()
   "Move point to the previous colour row."
   (interactive)
-  (when-let ((position (seq-find (lambda (start) (< start (line-beginning-position)))
+  (when-let* ((position (seq-find (lambda (start) (< start (line-beginning-position)))
                                  (reverse (init/some-nice-colors--row-positions)))))
     (goto-char position)))
 

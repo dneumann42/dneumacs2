@@ -102,6 +102,10 @@ Prevents its own saves and reverts from scheduling more work.")
 (defconst init/org-sync--process-buffer " *org-git-sync*"
   "Buffer collecting the output of the asynchronous Git process.")
 
+(defun init/org-sync--repository-p ()
+  "Return non-nil when the local Org Git checkout is available."
+  (file-directory-p (expand-file-name ".git" init/org-sync-directory)))
+
 ;;;; Running Git
 
 (defun init/org-sync--git (&rest arguments)
@@ -123,7 +127,7 @@ Return a cons of the exit status and the trimmed combined output."
 
 (defun init/org-sync--start-process (arguments callback)
   "Run Git ARGUMENTS asynchronously, then CALLBACK with status and output."
-  (when-let ((buffer (get-buffer init/org-sync--process-buffer)))
+  (when-let* ((buffer (get-buffer init/org-sync--process-buffer)))
     (kill-buffer buffer))
   (let ((buffer (get-buffer-create init/org-sync--process-buffer)))
     (setq init/org-sync--process
@@ -238,7 +242,7 @@ Idempotent, and leaves any existing .gitattributes content untouched."
 (defun init/org-sync--ahead-count ()
   "Return the number of local commits not yet on the upstream.
 Return 0 when there is no upstream, or the count cannot be determined."
-  (if-let ((upstream (init/org-sync--upstream)))
+  (if-let* ((upstream (init/org-sync--upstream)))
       (pcase-let ((`(,status . ,output)
                    (init/org-sync--git "rev-list" "--count"
                                        (concat upstream "..HEAD"))))
@@ -285,7 +289,7 @@ or a remote check that has become due."
 
 (defun init/org-sync--abort-operation ()
   "Abort any in-progress rebase, merge, cherry-pick or revert."
-  (when-let ((operation (init/org-sync--operation-in-progress)))
+  (when-let* ((operation (init/org-sync--operation-in-progress)))
     (init/org-sync--git operation "--abort")))
 
 (defun init/org-sync--open-magit (reason)
@@ -325,7 +329,7 @@ conflict stops automatic synchronisation and hands off to Magit."
   "Return non-nil when the last commit is an unpushed autosync commit.
 Amending it keeps the history from filling with one commit per idle
 pause."
-  (when-let ((upstream (init/org-sync--upstream)))
+  (when-let* ((upstream (init/org-sync--upstream)))
     (and (> (string-to-number
              (init/org-sync--git-success "rev-list" "--count"
                                          (concat upstream "..HEAD")))
@@ -372,7 +376,7 @@ Retries when the remote advanced between the fetch and the push."
       (while t
         (init/org-sync--git-success "fetch" "--prune" "origin")
         (setq init/org-sync--last-fetch (float-time))
-        (when-let ((upstream (init/org-sync--upstream)))
+        (when-let* ((upstream (init/org-sync--upstream)))
           (init/org-sync--integrate upstream))
         ;; Only reach for the network when there is something to send.
         (when (zerop (init/org-sync--ahead-count))
@@ -499,7 +503,7 @@ Emacs open on a slow or unreachable network."
   "Asynchronously integrate the upstream, then push.
 On a rebase conflict, abort and fall back to a merge so the tree is never
 left mid-rebase; the union driver resolves overlapping edits."
-  (if-let ((upstream (init/org-sync--upstream)))
+  (if-let* ((upstream (init/org-sync--upstream)))
       (init/org-sync--start-process
        (list "rebase" upstream)
        (lambda (status output)
@@ -606,6 +610,7 @@ left mid-rebase; the union driver resolves overlapping edits."
 ARGUMENTS are passed through.  This deliberately does not block session
 restoration on network access."
   (if (or init/org-sync--inhibit
+          (not (init/org-sync--repository-p))
           (not (init/org-sync--org-file-p filename)))
       (apply original filename arguments)
     (init/org-sync--schedule)
@@ -615,7 +620,8 @@ restoration on network access."
 (defun init/org-sync--around-org-entry (original &rest arguments)
   "Enter Org through ORIGINAL immediately and queue synchronisation.
 ARGUMENTS are passed through."
-  (if init/org-sync--inhibit
+  (if (or init/org-sync--inhibit
+          (not (init/org-sync--repository-p)))
       (apply original arguments)
     (init/org-sync--schedule)
     (let ((init/org-sync--inhibit t))
@@ -643,7 +649,7 @@ is behind, never fetches, and gives the push
 `init/org-sync-exit-timeout' seconds.  Anything not sent stays in Git and
 goes out with the next session's background synchronisation."
   (condition-case err
-      (progn
+      (when (init/org-sync--repository-p)
         (init/org-sync--cancel-timer)
         (when (and (init/org-sync--pending-work-p)
                    (init/org-sync--await-process init/org-sync-exit-timeout))
@@ -663,12 +669,9 @@ goes out with the next session's background synchronisation."
 
 (defun init/org-sync-install ()
   "Install the automatic synchronisation hooks for the Org repository."
-  (condition-case err
-      (init/org-sync-ensure-repository)
-    (error
-     ;; Keep startup usable while offline; the first Org operation retries.
-     (message "Org repository is not available yet: %s"
-              (error-message-string err))))
+  ;; Do not contact the network during startup.  Automatic sync stays dormant
+  ;; when the checkout is absent; `init/org-sync-now' remains the explicit
+  ;; command that creates it and reports any authentication problem.
   (add-hook 'after-save-hook #'init/org-sync-after-save)
   (add-hook 'kill-emacs-hook #'init/org-sync--flush-on-exit)
   (unless (advice-member-p #'init/org-sync--around-find-file 'find-file-noselect)

@@ -40,13 +40,18 @@
 (declare-function nim-indent-post-self-insert-function "nim-mode")
 (declare-function nim-indent-shift-left "nim-helper")
 (declare-function nim-indent-shift-right "nim-helper")
+(declare-function nim-nav-forward-sexp "nim-helper")
 (declare-function nimsuggest-available-p "nim-suggest")
 (declare-function nimsuggest-mode "nim-suggest")
 (declare-function nimsuggest-show-doc "nim-suggest")
 (declare-function nimsuggest--call-epc "nim-suggest")
 (declare-function nim--epc-column "nim-suggest")
+(declare-function nim--epc-doc "nim-suggest")
 (declare-function nim--epc-file "nim-suggest")
+(declare-function nim--epc-forth "nim-suggest")
 (declare-function nim--epc-line "nim-suggest")
+(declare-function nim--epc-qpath "nim-suggest")
+(declare-function nim--epc-symkind "nim-suggest")
 (defvar nim-mode-map)
 (defvar nimsuggest-local-options)
 (defvar nimsuggest-path)
@@ -105,7 +110,13 @@ indentation."
   (when (fboundp 'electric-indent-local-mode)
     (electric-indent-local-mode -1))
   (setq-local electric-indent-inhibit t
-              electric-indent-chars nil)
+              electric-indent-chars nil
+              ;; `smie-forward-sexp-command' calls Nim's SMIE token function
+              ;; without initialising `nim-smie--line-info'.  The token
+              ;; function then compares a line number with nil, breaking
+              ;; ordinary parenthesis motion.  nim-mode ships this separate
+              ;; navigation implementation specifically for sexp commands.
+              forward-sexp-function #'nim-nav-forward-sexp)
   (remove-hook 'post-self-insert-hook
                #'nim-indent-post-self-insert-function t))
 
@@ -141,9 +152,11 @@ indentation."
   :type 'directory
   :group 'init/lsp)
 
-(defcustom init/nim-tortoise-performance "HIGH"
+(defcustom init/nim-tortoise-performance "LOWEST"
   "Nim Tortoise performance mode.
-Valid values are HIGHEST, HIGH, LOW and LOWEST.  Upstream defaults to HIGH."
+Valid values are HIGHEST, HIGH, LOW and LOWEST.  LOWEST only rechecks open
+dependent files on save and uses the server's longest request-throttling
+window, keeping large Nim projects from monopolising Emacs between commands."
   :type '(choice (const "HIGHEST")
                  (const "HIGH")
                  (const "LOW")
@@ -159,10 +172,79 @@ Use 0 for no limit."
 (defvar init/nim-tortoise--install-declined nil
   "Non-nil when Nim Tortoise installation was declined this session.")
 
-(defcustom init/nim-use-lsp t
+(defvar init/nim-tortoise--install-process nil
+  "The currently running Nim Tortoise installer process, or nil.")
+
+(defvar init/nim-tortoise--install-state nil
+  "Installer state: nil, `installing', `installed', or `failed'.")
+
+(defvar init/nim-tortoise--install-detail nil
+  "Short description of the current Nim Tortoise installer step.")
+
+(defvar init/nim-tortoise--spinner-index 0)
+(defvar init/nim-tortoise--spinner-timer nil)
+
+(defconst init/nim-tortoise--spinner-frames ["◰" "◳" "◲" "◱"])
+
+(defvar init/nim-tortoise--mode-line-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map [mode-line mouse-1] #'init/nim-tortoise-show-install-log)
+    map))
+
+(defun init/nim-tortoise-show-install-log ()
+  "Display the complete Nim Tortoise installation log."
+  (interactive)
+  (display-buffer (init/nim-tortoise--log-buffer)))
+
+(defun init/nim-tortoise--mode-line ()
+  "Return the clickable Nim Tortoise installation status indicator."
+  (when init/nim-tortoise--install-state
+    (let* ((icon (pcase init/nim-tortoise--install-state
+                   ('installing
+                    (aref init/nim-tortoise--spinner-frames
+                          init/nim-tortoise--spinner-index))
+                   ('installed "✓")
+                   ('failed "✕")))
+           (label (format " Nim LSP %s " icon))
+           (help (format "Nim LSP: %s%s; click for the full install log"
+                         init/nim-tortoise--install-state
+                         (if init/nim-tortoise--install-detail
+                             (concat " (" init/nim-tortoise--install-detail ")")
+                           ""))))
+      (propertize label
+                  'face (pcase init/nim-tortoise--install-state
+                          ('installed 'success) ('failed 'error)
+                          (_ 'mode-line-emphasis))
+                  'help-echo help
+                  'mouse-face 'mode-line-highlight
+                  'local-map init/nim-tortoise--mode-line-map))))
+
+(add-to-list 'global-mode-string '(:eval (init/nim-tortoise--mode-line)) t)
+
+(defun init/nim-tortoise--set-install-state (state &optional detail)
+  "Set installer STATE and DETAIL, updating its mode-line indicator."
+  (setq init/nim-tortoise--install-state state
+        init/nim-tortoise--install-detail detail)
+  (if (eq state 'installing)
+      (unless (timerp init/nim-tortoise--spinner-timer)
+        (setq init/nim-tortoise--spinner-timer
+              (run-at-time 0 0.12
+                           (lambda ()
+                             (setq init/nim-tortoise--spinner-index
+                                   (mod (1+ init/nim-tortoise--spinner-index)
+                                        (length init/nim-tortoise--spinner-frames)))
+                             (force-mode-line-update t)))))
+    (when (timerp init/nim-tortoise--spinner-timer)
+      (cancel-timer init/nim-tortoise--spinner-timer))
+    (setq init/nim-tortoise--spinner-timer nil))
+  (force-mode-line-update t))
+
+(defcustom init/nim-use-lsp nil
   "When non-nil, use Nim Tortoise through Eglot for Nim buffers.
-When Nim Tortoise is unavailable or installation is declined, the older
-nimsuggest/Flycheck setup is used instead."
+Nim Tortoise deliberately rechecks dependent files on save, which can flood
+Emacs with diagnostics in a large project.  It is therefore opt-in; with nil,
+Flycheck runs the compiler asynchronously on save and nimsuggest starts only
+when an explicit navigation command needs it."
   :type 'boolean
   :group 'init/lsp)
 
@@ -200,54 +282,90 @@ formatting through `init/ide-format' remains available."
   "Return the Nim Tortoise installer log buffer."
   (get-buffer-create "*Nim Tortoise install*"))
 
-(defun init/nim-tortoise--run (directory program &rest args)
-  "Run PROGRAM with ARGS in DIRECTORY, appending output to the installer log."
+(defun init/nim-tortoise--log (format-string &rest args)
+  "Append FORMAT-STRING and ARGS to the installer log."
   (with-current-buffer (init/nim-tortoise--log-buffer)
-    (let ((default-directory directory))
+    (let ((inhibit-read-only t))
       (goto-char (point-max))
-      (insert "\n$ " (mapconcat #'identity (cons program args) " ") "\n")
-      (let ((status (apply #'process-file program nil t t args)))
-        (unless (zerop status)
-          (display-buffer (current-buffer)))
-        status))))
+      (insert (apply #'format format-string args)))))
+
+(defun init/nim-tortoise--start-process (name directory command sentinel)
+  "Start COMMAND named NAME in DIRECTORY, logging output and using SENTINEL."
+  (init/nim-tortoise--log "\n$ %s\n" (mapconcat #'shell-quote-argument command " "))
+  (let ((default-directory directory))
+    (setq init/nim-tortoise--install-process
+          (make-process :name name
+                        :buffer (init/nim-tortoise--log-buffer)
+                        :command command
+                        :noquery t
+                        :connection-type 'pipe
+                        :sentinel sentinel))))
+
+(defun init/nim-tortoise--finish-install (state detail worktree)
+  "Finish the install with STATE and DETAIL, then remove WORKTREE."
+  (setq init/nim-tortoise--install-process nil)
+  (init/nim-tortoise--set-install-state state detail)
+  (init/nim-tortoise--log "\n%s: %s\n"
+                          (if (eq state 'installed) "Finished" "Failed") detail)
+  (when (file-directory-p worktree)
+    (delete-directory worktree t))
+  (if (eq state 'installed)
+      (progn
+        (message "Nim LSP installed; click its ✓ indicator to view the log")
+        (dolist (buffer (buffer-list))
+          (with-current-buffer buffer
+            (when (derived-mode-p 'nim-mode)
+              (init/nim--setup-lsp)))))
+    (display-warning 'nim (concat detail "; click the Nim LSP ✕ for the log")
+                     :warning)))
 
 (defun init/nim-tortoise-install ()
-  "Install the pinned Nim Tortoise language server from source."
+  "Install Nim Tortoise asynchronously, with progress in the mode line."
   (interactive)
   (unless (executable-find "git")
     (user-error "git is required to install Nim Tortoise"))
   (unless (executable-find "nimble")
     (user-error "nimble is required to build Nim Tortoise"))
+  (when (process-live-p init/nim-tortoise--install-process)
+    (user-error "Nim Tortoise installation is already running"))
   (let* ((target (init/nim-tortoise-executable))
          (target-dir (file-name-directory target))
          (worktree (make-temp-file "nimtortoise-" t))
          (source-binary (expand-file-name "langserver/bin/nimtortoise" worktree)))
     (with-current-buffer (init/nim-tortoise--log-buffer)
-      (erase-buffer)
-      (insert (format "Installing Nim Tortoise %s\n" init/nim-tortoise-version)))
-    (unwind-protect
-        (progn
-          (unless
-              (zerop
-               (init/nim-tortoise--run
-                default-directory
-                "git" "clone" "--depth" "1" "--branch" init/nim-tortoise-version
-                init/nim-tortoise-repository worktree))
-            (user-error "Nim Tortoise clone failed; see *Nim Tortoise install*"))
-          (let ((default-directory (expand-file-name "langserver" worktree)))
-            (unless (zerop (init/nim-tortoise--run default-directory
-                                                   "nimble" "build"))
-              (user-error "Nim Tortoise build failed; see *Nim Tortoise install*")))
-          (unless (file-executable-p source-binary)
-            (user-error "Nim Tortoise build did not produce %s" source-binary))
-          (make-directory target-dir t)
-          (copy-file source-binary target t)
-          (set-file-modes target #o755)
-          (message "Installed Nim Tortoise %s to %s"
-                   init/nim-tortoise-version target)
-          target)
-      (when (file-directory-p worktree)
-        (delete-directory worktree t)))))
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert (format "Installing Nim Tortoise %s\n" init/nim-tortoise-version))))
+    (init/nim-tortoise--set-install-state 'installing "cloning source")
+    (message "Installing Nim LSP… click the spinning mode-line icon for the log")
+    (init/nim-tortoise--start-process
+     "nim-tortoise-clone" default-directory
+     (list "git" "clone" "--depth" "1" "--branch" init/nim-tortoise-version
+           init/nim-tortoise-repository worktree)
+     (lambda (process _event)
+       (when (memq (process-status process) '(exit signal))
+         (if (not (zerop (process-exit-status process)))
+             (init/nim-tortoise--finish-install 'failed "source clone failed" worktree)
+           (init/nim-tortoise--set-install-state 'installing "building server")
+           (init/nim-tortoise--start-process
+            "nim-tortoise-build" (expand-file-name "langserver" worktree)
+            '("nimble" "build")
+            (lambda (build-process _build-event)
+              (when (memq (process-status build-process) '(exit signal))
+                (cond
+                 ((not (zerop (process-exit-status build-process)))
+                  (init/nim-tortoise--finish-install 'failed "build failed" worktree))
+                 ((not (file-executable-p source-binary))
+                  (init/nim-tortoise--finish-install
+                   'failed "build produced no executable" worktree))
+                 (t
+                  (make-directory target-dir t)
+                  (copy-file source-binary target t)
+                  (set-file-modes target #o755)
+                  (init/nim-tortoise--finish-install
+                   'installed (format "installed %s" init/nim-tortoise-version)
+                   worktree))))))))))
+    nil))
 
 (defun init/nim--ensure-tortoise ()
   "Install Nim Tortoise after confirmation when the pinned binary is missing."
@@ -259,7 +377,7 @@ formatting through `init/ide-format' remains available."
        (format "Install Nim Tortoise %s for Nim LSP now? "
                init/nim-tortoise-version))
       (condition-case err
-          (init/nim-tortoise-install)
+          (progn (init/nim-tortoise-install) nil)
         (error
          (display-warning 'nim (error-message-string err) :warning)
          nil)))
@@ -282,7 +400,7 @@ formatting through `init/ide-format' remains available."
 
 (defun init/nim--nimble-file (&optional dir)
   "Return the first Nimble file in DIR's project root, or nil."
-  (when-let ((root (init/nim--nimble-root dir)))
+  (when-let* ((root (init/nim--nimble-root dir)))
     (car (file-expand-wildcards (expand-file-name "*.nimble" root)))))
 
 (defun init/nim-project-root ()
@@ -295,7 +413,7 @@ A nil entry stands for the project root itself.")
 
 (defun init/nim--project-search-paths (&optional dir)
   "Return the likely source search paths of the Nim project above DIR."
-  (when-let ((root (init/nim--nimble-root dir)))
+  (when-let* ((root (init/nim--nimble-root dir)))
     (delete-dups
      (delq nil
            (mapcar (lambda (name)
@@ -425,12 +543,12 @@ the position it was opened at, or the source buffer is left."
   "Return the Flycheck diagnostics at point, sorted by severity."
   (when (and (bound-and-true-p flycheck-mode)
              (fboundp 'flycheck-overlay-errors-at))
-    (when-let ((errors (flycheck-overlay-errors-at (point))))
+    (when-let* ((errors (flycheck-overlay-errors-at (point))))
       (sort (copy-sequence errors) #'flycheck-error-<))))
 
 (defun init/nim--error-snippet (error)
   "Return the source lines ERROR points at, or nil."
-  (when-let ((buffer (flycheck-error-buffer error)))
+  (when-let* ((buffer (flycheck-error-buffer error)))
     (when (buffer-live-p buffer)
       (with-current-buffer buffer
         (save-excursion
@@ -449,12 +567,18 @@ the position it was opened at, or the source buffer is left."
 
 (defun init/nim--fontify (text)
   "Return TEXT with Nim font-lock faces applied."
-  (with-temp-buffer
-    (insert text)
-    (goto-char (point-min))
-    (nim-mode)
-    (font-lock-ensure)
-    (buffer-substring (point-min) (point-max))))
+  ;; This is a throwaway syntax-highlighting buffer.  Running `nim-mode-hook'
+  ;; here would start another Eglot/nimsuggest setup while displaying a
+  ;; diagnostic, which can recursively generate more diagnostics and make the
+  ;; editor appear to hang until `keyboard-quit'.
+  (require 'nim-mode)
+  (let ((nim-mode-hook nil))
+    (with-temp-buffer
+      (insert text)
+      (goto-char (point-min))
+      (nim-mode)
+      (font-lock-ensure)
+      (buffer-substring (point-min) (point-max)))))
 
 (defun init/nim--format-diagnostic (error)
   "Format ERROR as a coloured diagnostic block."
@@ -488,29 +612,79 @@ the position it was opened at, or the source buffer is left."
            "\n"
            (string-join (mapcar #'init/nim--format-diagnostic errors) "\n"))))
 
+(defun init/nim--format-hover-definition (definition overload-count)
+  "Format nimsuggest DEFINITION for a point-anchored hover popup.
+OVERLOAD-COUNT is the number of additional definitions returned."
+  (let* ((qpath (nim--epc-qpath definition))
+         (name (and qpath (mapconcat #'identity qpath ".")))
+         (signature (or (nim--epc-forth definition) ""))
+         (documentation (or (nim--epc-doc definition) ""))
+         (file (nim--epc-file definition)))
+    (string-join
+     (delq nil
+           (list
+            (and name (not (string-empty-p name))
+                 (propertize name 'face 'bold))
+            (and (not (string-empty-p signature))
+                 (init/nim--fontify signature))
+            (and (not (string-empty-p documentation)) documentation)
+            (and (> overload-count 0)
+                 (propertize
+                  (format "%d additional overload%s"
+                          overload-count (if (= overload-count 1) "" "s"))
+                  'face 'shadow))
+            (and file (not (string-empty-p file))
+                 (propertize (abbreviate-file-name file) 'face 'shadow))))
+     "\n\n")))
+
+(defun init/nim--display-hover-results (marker definitions)
+  "Display DEFINITIONS at source position MARKER when it is still current."
+  (when-let* ((source (marker-buffer marker)))
+    (unwind-protect
+        (when (and definitions
+                   (buffer-live-p source)
+                   (= (marker-position marker)
+                      (with-current-buffer source (point))))
+          (with-current-buffer source
+            (init/nim--show-hover
+             (init/nim--format-hover-definition
+              (car definitions) (1- (length definitions))))))
+      (set-marker marker nil))))
+
+(defun init/nim--request-hover (method marker &optional fallback)
+  "Request hover data using nimsuggest METHOD for source MARKER.
+When FALLBACK is non-nil and METHOD returns nothing, retry with `sug'."
+  (nimsuggest--call-epc
+   method
+   (lambda (definitions)
+     (if (or definitions (not fallback))
+         (if definitions
+             (init/nim--display-hover-results marker definitions)
+           (set-marker marker nil)
+           (message "No Nim documentation at point"))
+       (init/nim--request-hover 'sug marker nil)))))
+
 (defun init/nim-hover-doc ()
-  "Show documentation for the symbol at point."
+  "Show nimsuggest documentation in a popup anchored at point."
   (interactive)
-  (cond
-   ((fboundp 'nimsuggest-show-doc)
-    (condition-case err
-        (nimsuggest-show-doc)
-      (error (message "%s" (error-message-string err)))))
-   ((fboundp 'eldoc-print-current-symbol-info)
-    (eldoc-print-current-symbol-info))
-   (t (message "No hover documentation command available."))))
+  (unless buffer-file-name
+    (user-error "Buffer is not visiting a file; nimsuggest needs a file"))
+  (init/nim--enable-nimsuggest)
+  (unless (and (fboundp 'nimsuggest-available-p) (nimsuggest-available-p))
+    (user-error "nimsuggest not found; install it with `nimble install nimsuggest'"))
+  (init/nim--request-hover 'def (copy-marker (point)) t))
 
 (defun init/nim-hover-diagnostics ()
   "Show the diagnostics at point, or documentation when there are none."
   (interactive)
-  (if-let ((errors (init/nim--diagnostics-at-point)))
+  (if-let* ((errors (init/nim--diagnostics-at-point)))
       (init/nim--show-diagnostics errors)
     (init/nim-hover-doc)))
 
 (defun init/nim-show-diagnostics ()
   "Show the diagnostics at point, or the whole error list when there are none."
   (interactive)
-  (if-let ((errors (init/nim--diagnostics-at-point)))
+  (if-let* ((errors (init/nim--diagnostics-at-point)))
       (init/nim--show-diagnostics errors)
     (if (fboundp 'flycheck-list-errors)
         (flycheck-list-errors)
@@ -533,7 +707,7 @@ afterwards."
                nimsuggest-path
                (file-executable-p nimsuggest-path))
     (init/nim--ensure-nimble-path)
-    (when-let ((path (executable-find "nimsuggest")))
+    (when-let* ((path (executable-find "nimsuggest")))
       (setq nimsuggest-path path))))
 
 (defun init/nim--enable-nimsuggest ()
@@ -736,7 +910,7 @@ ALLOW-EXTEND is non-nil when called interactively."
 (defun init/nim-format-buffer ()
   "Format the current Nim buffer with nph, when it is installed."
   (interactive)
-  (when-let ((nph (executable-find "nph")))
+  (when-let* ((nph (executable-find "nph")))
     (let* ((source (make-temp-file "emacs-nph-" nil
                                    (init/nim--formatter-extension)))
            (output (generate-new-buffer " *nph output*"))
@@ -769,12 +943,6 @@ ALLOW-EXTEND is non-nil when called interactively."
 (defun init/nim--flycheck-working-directory (_checker)
   "Return the directory Flycheck should run Nim commands in."
   (init/nim-project-root))
-
-(defun init/nim--flycheck-after-save ()
-  "Refresh the Nim diagnostics after the current buffer is saved."
-  (when (and (derived-mode-p 'nim-mode)
-             (bound-and-true-p flycheck-mode))
-    (flycheck-buffer)))
 
 (with-eval-after-load 'flycheck
   (flycheck-define-checker nim-check
@@ -819,6 +987,13 @@ When USE-LSP is non-nil, Nim Tortoise is responsible for nimsuggest."
 
 (defun init/nim--setup-lsp ()
   "Start Nim Tortoise for the current Nim buffer."
+  ;; A buffer may have entered the direct nimsuggest fallback while the
+  ;; asynchronous installer was running.  Do not leave both clients active.
+  (when (bound-and-true-p nimsuggest-mode)
+    (nimsuggest-mode -1))
+  ;; Clean up buffers configured by an older version which installed a
+  ;; redundant explicit Flycheck save hook.
+  (remove-hook 'after-save-hook #'init/nim--flycheck-after-save t)
   (setq-local eglot-workspace-configuration
               (init/nim-tortoise-workspace-configuration))
   (init/ide-start-eglot (init/nim-tortoise-executable)
@@ -826,10 +1001,13 @@ When USE-LSP is non-nil, Nim Tortoise is responsible for nimsuggest."
   (init/ide-prefer-flycheck))
 
 (defun init/nim--setup-nimsuggest ()
-  "Enable the direct nimsuggest/Flycheck fallback for this Nim buffer."
+  "Set up lightweight Nim diagnostics and on-demand nimsuggest commands."
   (init/nim--setup-diagnostics)
+  ;; Enabling the minor mode wires nimsuggest into Nim's Eldoc provider but
+  ;; does not eagerly launch a server.  The first hover/navigation request
+  ;; starts it asynchronously; unlike the removed prewarm, this adds no work
+  ;; to opening or saving a buffer.
   (init/nim--enable-nimsuggest)
-  (init/nim--prewarm-nimsuggest)
   (setq-local init/ide-hover-function #'init/nim-hover-diagnostics
               init/ide-diagnostics-function #'init/nim-show-diagnostics
               init/ide-actions-function #'init/nim-symbol-actions
@@ -846,7 +1024,9 @@ When USE-LSP is non-nil, Nim Tortoise is responsible for nimsuggest."
     (flycheck-posframe-mode -1))
   (setq-local flycheck-display-errors-function #'init/nim--show-diagnostics
               flycheck-clear-displayed-errors-function #'init/nim--hide-hover)
-  (add-hook 'after-save-hook #'init/nim--flycheck-after-save nil t))
+  ;; Flycheck already observes `flycheck-check-syntax-automatically'.  Remove
+  ;; the old explicit hook so saving cannot start the checker twice.
+  (remove-hook 'after-save-hook #'init/nim--flycheck-after-save t))
 
 (defun init/nim-setup ()
   "Set up Nim editing, diagnostics and navigation in the current buffer."
@@ -931,7 +1111,7 @@ The symbol `unset' means detection has not run yet.")
 (defun init/nim-doc--libpath ()
   "Return the active Nim toolchain's library path, or nil.
 Runs `nim dump' on a throwaway file and reads its JSON libpath."
-  (when-let ((nim (executable-find "nim")))
+  (when-let* ((nim (executable-find "nim")))
     (let ((probe (make-temp-file "nim-doc-probe-" nil ".nim")))
       (unwind-protect
           (with-temp-buffer
@@ -949,7 +1129,7 @@ Runs `nim dump' on a throwaway file and reads its JSON libpath."
 
 (defun init/nim-doc--compiler-version ()
   "Return the active Nim compiler's version string, or nil."
-  (when-let ((nim (executable-find "nim")))
+  (when-let* ((nim (executable-find "nim")))
     (with-temp-buffer
       (when (zerop (call-process nim nil (list t nil) nil "--version"))
         (goto-char (point-min))
@@ -965,11 +1145,11 @@ Runs `nim dump' on a throwaway file and reads its JSON libpath."
   (or (init/nim-doc--existing-directory init/nim-doc-directory)
       ;; Authoritative: docs live at <libpath>/../doc/html for every
       ;; layout, be it choosenim, a distribution package or a manual build.
-      (when-let ((libpath (init/nim-doc--libpath)))
+      (when-let* ((libpath (init/nim-doc--libpath)))
         (init/nim-doc--existing-directory
          (expand-file-name "../doc/html" libpath)))
       ;; Fallback: the choosenim toolchain layout, keyed by version.
-      (when-let ((version (init/nim-doc--compiler-version)))
+      (when-let* ((version (init/nim-doc--compiler-version)))
         (init/nim-doc--existing-directory
          (expand-file-name
           (format "~/.choosenim/toolchains/nim-%s/doc/html" version))))))
@@ -1017,7 +1197,7 @@ Runs `nim dump' on a throwaway file and reads its JSON libpath."
     (goto-char (point-min))
     (let (entries)
       (while (not (eobp))
-        (when-let ((entry (init/nim-doc--parse-idx-line
+        (when-let* ((entry (init/nim-doc--parse-idx-line
                            (buffer-substring-no-properties
                             (line-beginning-position) (line-end-position)))))
           (push entry entries))

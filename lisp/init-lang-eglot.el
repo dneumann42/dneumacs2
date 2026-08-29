@@ -520,7 +520,7 @@ Return that buffer."
 (defun init/ruby--ensure-gem-path ()
   "Make user-installed Ruby gem executables visible to Emacs.
 The detection runs Ruby, so it is done once, on the first Ruby buffer."
-  (when-let ((directory (or init/ruby--gem-user-bin
+  (when-let* ((directory (or init/ruby--gem-user-bin
                             (setq init/ruby--gem-user-bin
                                   (init/ruby--detect-gem-user-bin)))))
     (init/prepend-to-path directory)))

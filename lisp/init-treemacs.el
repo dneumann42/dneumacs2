@@ -213,7 +213,7 @@ would discard the remembered name for good."
     ;; This call is what reads Treemacs's persist file, so the by-name
     ;; lookup it populates has to come after it.
     (let ((current (treemacs-current-workspace)))
-      (when-let ((workspace (treemacs-find-workspace-by-name
+      (when-let* ((workspace (treemacs-find-workspace-by-name
                              init/treemacs-workspace)))
         (unless (eq workspace current)
           (treemacs-do-switch-workspace workspace))))))

@@ -89,7 +89,7 @@
 Commands started from the buffer -- compilation, grep, shells -- then run
 from the repository root rather than from the file's own directory."
   (when buffer-file-name
-    (when-let ((root (init/git-repo-root buffer-file-name)))
+    (when-let* ((root (init/git-repo-root buffer-file-name)))
       (setq-local default-directory root))))
 
 (add-hook 'find-file-hook #'init/set-default-directory-to-git-root)

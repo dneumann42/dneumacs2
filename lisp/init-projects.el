@@ -100,7 +100,7 @@ you kill it, and `g' re-runs the same search."
     (grep (format (concat "rg --line-number --with-filename --no-heading"
                           " --color=never --smart-case -e %s .")
                   (shell-quote-argument term))))
-  (when-let ((buffer (get-buffer "*grep*")))
+  (when-let* ((buffer (get-buffer "*grep*")))
     (with-current-buffer buffer
       (rename-buffer (format "*search: %s*" term) t))))
 
@@ -200,10 +200,21 @@ you kill it, and `g' re-runs the same search."
   ;; Project sessions are created programmatically; never prompt about it.
   (easysession-confirm-new-session nil)
   :config
-  (init/session-rewrite-renamed-paths)
-  ;; Restore the previous session, frame geometry included, and turn on
-  ;; the auto-save mode.
-  (easysession-setup))
+  (init/session-rewrite-renamed-paths))
+
+(defun init/session-setup ()
+  "Restore the previous session after startup has finished.
+Deferring this avoids opening files while a lexical-binding source file is
+still being loaded.  Session restoration also invokes verbose major modes for
+every restored file; their routine setup messages are suppressed."
+  (let ((inhibit-message t))
+    (easysession-setup)))
+
+;; Restore the previous session, frame geometry included, and enable periodic
+;; saving only after init.el has finished loading.  Opening saved buffers from
+;; inside a lexically bound module produces a spurious Emacs 31 warning when
+;; their own file-local variables are installed.
+(add-hook 'emacs-startup-hook #'init/session-setup)
 
 ;; Keep the *scratch* buffer's contents across restarts.  easysession is
 ;; configured never to kill it, so it follows you between sessions too.
@@ -652,7 +663,7 @@ finishing in the background still updates Projectile."
                    'face 'shadow))
           (goto-char (point-min))
           (when at-url
-            (when-let ((position (text-property-any
+            (when-let* ((position (text-property-any
                                   (point-min) (point-max)
                                   'init/project-panel-url at-url)))
               (goto-char position))))))))

@@ -169,7 +169,7 @@ such as the cheatsheet Guides menu."
   (let (entries)
     (map-keymap
      (lambda (key binding)
-       (when-let ((entry (init/tab-bar--menu-entry binding)))
+       (when-let* ((entry (init/tab-bar--menu-entry binding)))
          (push (cons key entry) entries)))
      (menu-bar-keymap))
     entries))
@@ -179,7 +179,7 @@ such as the cheatsheet Guides menu."
   (let ((menu (make-sparse-keymap label)))
     ;; `define-key' prepends menu entries, hence the reverse iteration.
     (dolist (member (reverse members))
-      (when-let ((entry (alist-get member entries)))
+      (when-let* ((entry (alist-get member entries)))
         (define-key menu (vector member)
                     `(menu-item ,(car entry) ,(cdr entry)))))
     menu))
@@ -373,7 +373,7 @@ The project and session tools live in the global toolbar (⚒) instead."
   (defun init/configure-nerd-icons-font (&optional frame)
     "Bind `nerd-icons' to an installed Nerd Font family for FRAME."
     (when (display-graphic-p frame)
-      (when-let ((family (init/nerd-icons-font-family)))
+      (when-let* ((family (init/nerd-icons-font-family)))
         (setq nerd-icons-font-family family)
         (when (fboundp 'nerd-icons-set-font)
           (nerd-icons-set-font family frame)))))

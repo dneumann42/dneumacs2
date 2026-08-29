@@ -385,7 +385,7 @@ nothing."
   ;; except the Treemacs column.
   (setq window-sides-vertical t)
   (unless (init/doc-toolbar--window)
-    (when-let ((window (display-buffer-in-side-window
+    (when-let* ((window (display-buffer-in-side-window
                         (init/doc-toolbar--buffer)
                         '((side . top)
                           (slot . 0)
@@ -396,7 +396,7 @@ nothing."
 
 (defun init/doc-toolbar--hide ()
   "Remove the toolbar bar window."
-  (when-let ((window (init/doc-toolbar--window)))
+  (when-let* ((window (init/doc-toolbar--window)))
     (delete-window window)))
 
 ;;;###autoload

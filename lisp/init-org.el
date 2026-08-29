@@ -104,7 +104,7 @@
   "Use the writer font and comfortable spacing in this Org buffer.
 Code blocks, tables and metadata stay fixed-pitch through the face setup
 in the `org' :config block."
-  (when-let ((family (init/ensure-writer-font)))
+  (when-let* ((family (init/ensure-writer-font)))
     (setq init/org--writer-font-remap
           ;; Garamond has a small x-height; render it larger so body text
           ;; sits comfortably next to the monospace UI.
@@ -483,7 +483,7 @@ else contributes up to the first blank line, or the end of its line."
 
 (defun init/org-reference--content (target)
   "Return the display text for the local Org TARGET, or nil."
-  (when-let ((position (init/org-reference--target-position target)))
+  (when-let* ((position (init/org-reference--target-position target)))
     (save-excursion
       (save-restriction
         (widen)
@@ -583,7 +583,7 @@ BUFFER and POSITION are where the mouse now points."
 
 (defun init/org-reference--hover-show (buffer position target)
   "Show TARGET for the link at POSITION in BUFFER, as a hover popup."
-  (when-let ((window (get-buffer-window buffer t)))
+  (when-let* ((window (get-buffer-window buffer t)))
     (save-selected-window
       (select-window window)
       (save-excursion
@@ -827,7 +827,7 @@ with the buffer like the rest of the Org text."
 
 (defun init/org--tag-image (label face)
   "Return a rounded pill image showing LABEL in the colours of FACE."
-  (when-let ((metrics (init/org--tag-metrics)))
+  (when-let* ((metrics (init/org--tag-metrics)))
     (pcase-let* ((`(,family ,size ,advance ,ascent ,descent) metrics)
                  (background (or (init/org--face-attribute face :background)
                                  (face-attribute 'init/org-tag :background nil t)))

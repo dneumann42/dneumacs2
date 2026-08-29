@@ -225,10 +225,10 @@ Scheme buffers already open there, so the prompt is only answered once."
   ;; Redefine the predicate to tolerate a missing debug prompt.
   (defun geiser-repl--matches-prompt-p (text)
     "Return non-nil when TEXT contains the REPL or debugger prompt."
-    (or (when-let ((prompt (geiser-con--connection-prompt
+    (or (when-let* ((prompt (geiser-con--connection-prompt
                             geiser-repl--connection)))
           (string-match-p prompt text))
-        (when-let ((debug-prompt (geiser-con--connection-debug-prompt
+        (when-let* ((debug-prompt (geiser-con--connection-debug-prompt
                                   geiser-repl--connection)))
           (string-match-p debug-prompt text)))))
 
@@ -327,7 +327,7 @@ A project qualifies when the .envrc found above DIR mentions g-golf."
   (interactive)
   (save-buffer)
   (require 'geiser-repl nil 'noerror)
-  (if-let ((repl (geiser-repl--repl/impl 'guile)))
+  (if-let* ((repl (geiser-repl--repl/impl 'guile)))
       (with-current-buffer repl
         (geiser-repl--send "(reload)" t))
     (user-error "No Geiser REPL connected.  Use C-c C-g first")))

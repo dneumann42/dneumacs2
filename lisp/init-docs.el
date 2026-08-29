@@ -122,7 +122,7 @@ Used as the `auto-mode-alist' handler for PDF files."
   (if (init/pdf-server-ready-p)
       (progn
         (message "epdfinfo built; opening pending PDFs")
-        (when-let ((window (get-buffer-window (process-buffer process))))
+        (when-let* ((window (get-buffer-window (process-buffer process))))
           (quit-window nil window))
         (init/pdf--open-pending-buffers))
     (message "epdfinfo build failed; see the %s buffer"
@@ -326,7 +326,7 @@ Navigation blocks are mostly links; article text is mostly not.")
 Scans from the top of the page for the first paragraph with enough words,
 and few enough links, to be body text."
   (interactive)
-  (if-let ((position (init/eww--find-content)))
+  (if-let* ((position (init/eww--find-content)))
       (progn
         (goto-char position)
         (recenter 1)
@@ -378,7 +378,7 @@ and few enough links, to be body text."
   (init/eww--attach-toolbar)
   ;; Proportional text (shr's default) in the writer font, like Org.
   (when (display-graphic-p)
-    (when-let ((family (init/ensure-writer-font)))
+    (when-let* ((family (init/ensure-writer-font)))
       (face-remap-add-relative 'variable-pitch :family family :height 1.2)))
   (setq-local line-spacing 0.1))
 

@@ -46,6 +46,7 @@
 (require 'init-completion)
 (require 'init-bookmarks)
 (require 'init-compile)
+(require 'init-ai)
 
 ;;;; Workspace
 

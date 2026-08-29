@@ -101,7 +101,7 @@ Projectile decides first, since it is the project system the project
 commands and sessions are built on; project.el is the fallback."
   (let ((default-directory (or dir default-directory)))
     (or (and (fboundp 'projectile-project-root) (projectile-project-root))
-        (when-let ((project (project-current nil)))
+        (when-let* ((project (project-current nil)))
           (project-root project))
         default-directory)))
 
@@ -186,7 +186,7 @@ predicate deciding when the popup dismisses itself."
   "Hide the popup called NAME, however it is currently displayed."
   (if (fboundp 'posframe-hide)
       (posframe-hide name)
-    (when-let ((window (get-buffer-window name t)))
+    (when-let* ((window (get-buffer-window name t)))
       (quit-window nil window))))
 
 (defun init/popup-visible-p (name)

@@ -405,7 +405,7 @@ DEPTH and PARENT-INDEX identify the level within the open menu tree."
 
 (defun pulldown-menu--current-item (level)
   "Return the currently selected item of LEVEL, or nil."
-  (when-let ((selection (pulldown-menu--level-selection level)))
+  (when-let* ((selection (pulldown-menu--level-selection level)))
     (nth selection (pulldown-menu--level-items level))))
 
 (defun pulldown-menu--child-of (level)
@@ -547,7 +547,7 @@ selected and its submenu state already matches."
 
 (defun pulldown-menu--hover (event)
   "Handle a mouse-movement EVENT: highlight and open submenus on hover."
-  (when-let ((hit (pulldown-menu--event->hit event)))
+  (when-let* ((hit (pulldown-menu--event->hit event)))
     (pcase-let ((`(,level . ,index) hit))
       (let ((item (nth index (pulldown-menu--level-items level))))
         (when (and (pulldown-menu--selectable-p item)
@@ -559,7 +559,7 @@ selected and its submenu state already matches."
 
 (defun pulldown-menu--click (event)
   "Handle a mouse click EVENT: activate the row under it."
-  (when-let ((hit (pulldown-menu--event->hit event)))
+  (when-let* ((hit (pulldown-menu--event->hit event)))
     (pcase-let ((`(,level . ,index) hit))
       (let ((item (nth index (pulldown-menu--level-items level))))
         (when (pulldown-menu--selectable-p item)
@@ -634,7 +634,7 @@ Return the command the user chose, or nil."
 
 (defun pulldown-menu--point-position (frame)
   "Return frame-relative (X . Y) just below point in FRAME."
-  (if-let ((position (posn-at-point)))
+  (if-let* ((position (posn-at-point)))
       (pcase-let ((`(,x . ,y) (posn-x-y position))
                   (`(,left ,top ,_r ,_b) (window-inside-pixel-edges)))
         (cons (+ x left) (+ y top (frame-char-height frame))))

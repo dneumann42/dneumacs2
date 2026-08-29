@@ -176,7 +176,7 @@ directory is project.el's own representation of a rootless project.
 DIR arrives from `default-directory', which in a file buffer has been
 moved to the Git root, so a visited file overrides it for the same
 reason `init/jvm--source-directory' exists."
-  (when-let ((root (init/jvm--build-root
+  (when-let* ((root (init/jvm--build-root
                     (if buffer-file-name (init/jvm--source-directory) dir))))
     (cons 'transient (expand-file-name root))))
 
@@ -641,7 +641,7 @@ terminal, which the run/build panel shows as noise."
   "Return the Gradle wrapper governing this buffer's build, or nil.
 A component of a composite build usually has no wrapper of its own and
 shares the umbrella's, so the search continues above the build root."
-  (when-let ((dir (locate-dominating-file (init/jvm-project-root) "gradlew")))
+  (when-let* ((dir (locate-dominating-file (init/jvm-project-root) "gradlew")))
     (expand-file-name "gradlew" dir)))
 
 (defun init/jvm--module-path ()
@@ -653,7 +653,7 @@ addresses that module alone.  Nil means the build's root project."
                        init/jvm-module-markers (init/jvm--source-directory)))
               (relative (file-relative-name (expand-file-name module) root)))
     (unless (string-prefix-p ".." relative)
-      (when-let ((segments (split-string relative "/" t "\\.")))
+      (when-let* ((segments (split-string relative "/" t "\\.")))
         (concat ":" (string-join segments ":"))))))
 
 (defun init/jvm--module-task (name)
@@ -726,7 +726,7 @@ no tree-sitter parser is running in this buffer."
 That is the spelling Gradle's --tests filter matches on.  Falls back to
 the file's own name, which is what Kotlin and Java call the class a file
 principally declares."
-  (or (when-let ((names (init/jvm--enclosing init/jvm--class-node-types)))
+  (or (when-let* ((names (init/jvm--enclosing init/jvm--class-node-types)))
         (string-join names "$"))
       (file-name-base buffer-file-name)))
 
@@ -744,7 +744,7 @@ principally declares."
 enclosing function is read from the syntax tree, and `which-function' is
 only the fallback for the modes that have no parser."
   (or (car (last (init/jvm--enclosing init/jvm--function-node-types)))
-      (when-let ((name (which-function)))
+      (when-let* ((name (which-function)))
         (string-trim (car (last (split-string name "\\."))) "`" "`"))))
 
 (defun init/jvm-run ()

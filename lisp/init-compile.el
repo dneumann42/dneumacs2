@@ -129,7 +129,7 @@ ALIST is the `display-buffer' action alist."
 
 (defun init/compilation--side-window ()
   "Return the embedded panel window, or nil."
-  (when-let ((buffer (init/compilation--buffer)))
+  (when-let* ((buffer (init/compilation--buffer)))
     (seq-find (lambda (window) (window-parameter window 'window-side))
               (get-buffer-window-list buffer nil t))))
 
@@ -140,7 +140,7 @@ ALIST is the `display-buffer' action alist."
 
 (defun init/compilation--show ()
   "Show the run/build panel for its existing buffer."
-  (when-let ((buffer (init/compilation--buffer)))
+  (when-let* ((buffer (init/compilation--buffer)))
     (display-buffer buffer)))
 
 ;;;; Panel commands
@@ -151,7 +151,7 @@ ALIST is the `display-buffer' action alist."
   (when (frame-live-p init/compilation-frame)
     (delete-frame init/compilation-frame)
     (setq init/compilation-frame nil))
-  (when-let ((window (init/compilation--side-window)))
+  (when-let* ((window (init/compilation--side-window)))
     (when (window-live-p window)
       (delete-window window))))
 
@@ -367,7 +367,7 @@ command."
 (defun init/project-commands-unfocus-panel ()
   "Return focus from the panel to the editing frame."
   (interactive)
-  (if-let ((parent (frame-parent (selected-frame))))
+  (if-let* ((parent (frame-parent (selected-frame))))
       (select-frame-set-input-focus parent)
     (other-window 1)))
 
