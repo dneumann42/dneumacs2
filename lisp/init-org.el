@@ -48,11 +48,14 @@
 (declare-function org-todo "org")
 (declare-function org-up-heading-safe "org")
 (declare-function org-update-statistics-cookies "org")
+;; Dynamically bound by `font-lock-default-fontify-region' around the
+;; `font-lock-extend-region-functions' it calls.
+(defvar font-lock-beg)
+(defvar font-lock-end)
 (defvar org-babel-load-languages)
 (defvar org-directory)
 (defvar org-log-done)
 (defvar org-mode-map)
-(defvar org-src-block-faces)
 (defvar org-src-fontify-natively)
 (defvar org-todo-log-states)
 
@@ -199,14 +202,51 @@ Source blocks, tables and metadata only line up in a fixed-pitch font.")
                           (face-remap-add-relative face 'fixed-pitch)))
                       init/org-source-font-lock-faces))))
 
+(defconst init/org--block-delimiter-regexp
+  "^[ \t]*#\\+\\(begin\\|end\\)_\\S-+"
+  "Matches an Org block delimiter line, keyword in group 1.")
+
+(defun init/org--block-bounds-at (pos)
+  "Return (BEG . END) of the Org block containing POS, or nil.
+POS is inside a block only when the nearest delimiter above it opens one."
+  (save-excursion
+    (save-match-data
+      (let ((case-fold-search t))
+        (goto-char pos)
+        (forward-line 0)
+        (when (and (re-search-backward init/org--block-delimiter-regexp nil t)
+                   (equal (downcase (match-string 1)) "begin"))
+          (let ((beg (match-beginning 0)))
+            (when (re-search-forward "^[ \t]*#\\+end_\\S-+.*$" nil t)
+              (cons beg (min (point-max) (1+ (point)))))))))))
+
+(defun init/org--extend-region-to-blocks ()
+  "Grow the font-lock region to cover whole Org blocks.
+Org fontifies a block by searching forward for its `#+begin_' line, so a
+region starting inside a block never sees that delimiter and leaves the
+body unfontified -- no monospace, no native syntax colours.  Org's own
+`font-lock-multiline' property only protects blocks that have already
+been fontified once, so it cannot close this first-pass gap: jit-lock
+hands font-lock a chunk boundary that lands wherever the window happens
+to start.  Snapping both ends out to the enclosing delimiters does."
+  (let (changed)
+    (let ((bounds (init/org--block-bounds-at font-lock-beg)))
+      (when (and bounds (< (car bounds) font-lock-beg))
+        (setq font-lock-beg (car bounds) changed t)))
+    (let ((bounds (init/org--block-bounds-at font-lock-end)))
+      (when (and bounds (> (cdr bounds) font-lock-end))
+        (setq font-lock-end (cdr bounds) changed t)))
+    changed))
+
 (defun init/org-source-block-display-setup ()
   "Keep Org source blocks monospaced and fully fontified."
-  (setq-local org-src-fontify-natively t
-              org-src-block-faces '((".*" (:inherit fixed-pitch)))
-              jit-lock-chunk-size nil)
+  (setq-local org-src-fontify-natively t)
+  ;; Without this a block is fontified only when the region happens to
+  ;; start at or above its `#+begin_' line.
+  (add-hook 'font-lock-extend-region-functions
+            #'init/org--extend-region-to-blocks nil t)
   (init/org--remap-source-font-lock-faces)
-  (font-lock-flush)
-  (font-lock-ensure))
+  (font-lock-flush))
 
 ;;;; Striped tables
 
@@ -923,7 +963,7 @@ theme or font needs a refontification."
   :hook ((org-mode . org-modern-mode)
          (org-agenda-finalize . org-modern-agenda))
   :custom
-  (org-modern-star nil)
+  (org-modern-star 'replace)
   (org-modern-replace-stars "◉○✸✿◆◇▶▷")
   (org-modern-table t)
   (org-modern-keyword t)
