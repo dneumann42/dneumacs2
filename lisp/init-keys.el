@@ -34,6 +34,9 @@
 (defconst bind/surround "M-'"
   "Prefix key for the surround keymap (wrap, change and delete pairs).")
 
+(defconst bind/rebalance-panes "C-c ="
+  "Rebalance the size of panes.")
+
 (defconst bind/toggle-frame-transparency "C-c t"
   "Key sequence for toggling frame transparency.")
 (defconst bind/toggle-menu-bar "C-c M"
@@ -90,6 +93,11 @@
   "Alternate key sequence for the project bookmark picker.")
 (defconst bind/bm-clear-buffer "C-c ,"
   "Key sequence for removing all bookmarks in the current file.")
+
+;;;; AI (gptel)
+
+(defconst bind/ai-backend-menu "C-c m"
+  "Key sequence for switching the gptel LLM backend.")
 
 ;;;; Shared IDE actions
 

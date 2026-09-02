@@ -243,4 +243,12 @@ Overrides `treesit-auto--set-major-remap', which rebuilds it every time."
 (global-set-key (kbd bind/repeat) #'repeat)
 
 (provide 'init-editor)
+
+(defun init/rebalance-panes ()
+  "Rebalance the sizes of all panes in the selected frame."
+  (interactive)
+  (balance-windows))
+
+(global-set-key (kbd bind/rebalance-panes) #'init/rebalance-panes)
+
 ;;; init-editor.el ends here

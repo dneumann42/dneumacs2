@@ -200,21 +200,12 @@ you kill it, and `g' re-runs the same search."
   ;; Project sessions are created programmatically; never prompt about it.
   (easysession-confirm-new-session nil)
   :config
-  (init/session-rewrite-renamed-paths))
-
-(defun init/session-setup ()
-  "Restore the previous session after startup has finished.
-Deferring this avoids opening files while a lexical-binding source file is
-still being loaded.  Session restoration also invokes verbose major modes for
-every restored file; their routine setup messages are suppressed."
-  (let ((inhibit-message t))
-    (easysession-setup)))
-
-;; Restore the previous session, frame geometry included, and enable periodic
-;; saving only after init.el has finished loading.  Opening saved buffers from
-;; inside a lexically bound module produces a spurious Emacs 31 warning when
-;; their own file-local variables are installed.
-(add-hook 'emacs-startup-hook #'init/session-setup)
+  (init/session-rewrite-renamed-paths)
+  ;; Register EasySession's startup restore and shutdown/periodic save hooks
+  ;; while the init file is still loading.  Calling `easysession-setup' from
+  ;; `emacs-startup-hook' is too late: it only adds hooks to that same startup
+  ;; hook, so they do not reliably run for the current startup.
+  (easysession-setup))
 
 ;; Keep the *scratch* buffer's contents across restarts.  easysession is
 ;; configured never to kill it, so it follows you between sessions too.

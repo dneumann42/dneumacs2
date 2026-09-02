@@ -135,7 +135,7 @@ indentation."
 
 (init/nim--ensure-nimble-path)
 
-(defcustom init/nim-tortoise-version "v0.2.1"
+(defcustom init/nim-tortoise-version "v0.3.2"
   "Version tag of Nim Tortoise to install and use."
   :type 'string
   :group 'init/lsp)

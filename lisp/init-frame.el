@@ -70,7 +70,7 @@ means no transparency at all."
   :set #'init/frame-alpha--set
   :group 'init/frame-transparency)
 
-(defcustom init/frame-alpha-translucent 95
+(defcustom init/frame-alpha-translucent 80
   "Alpha-background percentage used for translucent frames.
 Lower is more see-through: 100 is fully opaque, 0 shows only whatever is
 behind Emacs.  Change it with \\[customize-option] and translucent frames

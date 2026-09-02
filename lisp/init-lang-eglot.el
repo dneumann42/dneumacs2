@@ -31,8 +31,13 @@
   :type 'boolean
   :group 'init/lsp)
 
-(defcustom init/c-auto-create-compile-flags t
-  "When non-nil, create project compile_flags.txt for C and C++ buffers."
+(defcustom init/c-auto-create-compile-flags nil
+  "When non-nil, create project compile_flags.txt for C and C++ buffers.
+
+This is disabled by default because a root-level fallback flag file takes
+precedence over a compilation database in a build subdirectory.  That is a
+common layout for Meson and CMake projects, and masking its database makes
+clangd report diagnostics for the wrong build configuration."
   :type 'boolean
   :group 'init/lsp)
 
@@ -44,12 +49,23 @@ UseTab: Never
 "
   "Default clang-format style written for C and C++ projects.")
 
-(defconst init/c-default-compile-flags
-  '("-Wall"
-    "-Wextra"
-    "-Isrc"
-    "-Ibuild/tcc")
-  "Default clangd flags written for small C and C++ projects.")
+(defun init/c-default-compile-flags ()
+  "Return default clangd flags for small C and C++ projects.
+
+Use pkg-config when available so clangd sees the same Qt and other library
+include directories as the compiler."
+  (let ((pkg-config (executable-find "pkg-config")))
+    (append '("-std=c++23" "-Wall" "-Wextra" "-Isrc")
+            (when pkg-config
+              (let ((flags (with-temp-buffer
+                             (when (zerop
+                                    (call-process pkg-config nil t nil
+                                                  "--cflags"
+                                                  "Qt6Widgets"
+                                                  "libmpdclient"))
+                               (buffer-string)))))
+                (unless (string-empty-p flags)
+                  (split-string (string-trim flags) "[[:space:]]+" t)))))))
 
 (defun init/c-project-root ()
   "Return the root for the current C or C++ project."
@@ -77,18 +93,28 @@ UseTab: Never
              (insert init/c-default-clang-format))))))))
 
 (defun init/c-ensure-compile-flags ()
-  "Create compile_flags.txt at the C or C++ project root when no compile DB exists."
+  "Create compile_flags.txt only when the project has no compilation database.
+
+Check the conventional build directories too: clangd searches parent
+directories for a database but does not descend into build directories."
   (when (and init/c-auto-create-compile-flags buffer-file-name)
     (let* ((root (file-name-as-directory (expand-file-name (init/c-project-root))))
            (compile-db (expand-file-name "compile_commands.json" root))
+           (build-compile-dbs
+            (mapcar (lambda (directory)
+                      (expand-file-name "compile_commands.json"
+                                        (expand-file-name directory root)))
+                    '("build" "builddir" "_build")))
            (flags-file (expand-file-name "compile_flags.txt" root)))
-      (unless (or (file-exists-p compile-db) (file-exists-p flags-file))
+      (unless (or (file-exists-p compile-db)
+                  (seq-some #'file-exists-p build-compile-dbs)
+                  (file-exists-p flags-file))
         (make-directory root t)
         (init/atomic-write-file
          flags-file
          (lambda (temporary)
            (with-temp-file temporary
-             (dolist (flag init/c-default-compile-flags)
+             (dolist (flag (init/c-default-compile-flags))
                (insert flag "\n")))))))))
 
 (defun init/c-format-buffer ()
@@ -114,16 +140,26 @@ UseTab: Never
 
 (defun init/c-setup ()
   "Set up C and C++ editing, LSP and diagnostics in the current buffer."
-  ;; `c-set-style' only works in a real CC Mode buffer, and it signals
-  ;; otherwise.  Emacs 30 makes `c-ts-mode' report as derived from
-  ;; `c-mode', so deriving-mode is not a safe test: ask CC Mode itself.
-  (when (bound-and-true-p c-buffer-is-cc-mode)
-    (c-set-style "linux"))
+  ;; Repair buffers initialized by the previous formatter-backed indenter.
+  ;; This also makes re-evaluating this file fix an already-open buffer.
+  (when (eq indent-line-function 'init/c-indent-line)
+    (setq-local indent-line-function
+                (if (bound-and-true-p c-buffer-is-cc-mode)
+                    'c-indent-line
+                  'treesit-indent-line)))
   (setq-local c-basic-offset 4
               tab-width 4
-              indent-tabs-mode nil)
-  (when (boundp 'c-ts-mode-indent-offset)
-    (setq-local c-ts-mode-indent-offset 4))
+              indent-tabs-mode nil
+              ;; `clang-format' is deliberately only run on save or on the
+              ;; explicit format command.  Calling a whole-buffer formatter
+              ;; from `indent-line-function' lets RET/TAB rewrite earlier
+              ;; lines according to a project style (often two spaces).
+              electric-indent-inhibit t)
+  (when (fboundp 'electric-indent-local-mode)
+    (electric-indent-local-mode -1))
+  ;; Tree-sitter C/C++ uses this variable instead of `c-basic-offset'.
+  ;; Set it directly so its built-in two-space default cannot win.
+  (setq-local c-ts-mode-indent-offset 4)
   (init/c-ensure-clang-format)
   (init/c-ensure-compile-flags)
   (init/ide-start-eglot (car init/clangd-command)
@@ -141,6 +177,11 @@ UseTab: Never
 
 (add-hook 'c-ts-mode-hook #'init/c-setup)
 (add-hook 'c++-ts-mode-hook #'init/c-setup)
+
+;; Tree-sitter C/C++ defaults to two spaces unless a mode-local setup changes
+;; it.  Set the default after the package defines its variable as well.
+(with-eval-after-load 'c-ts-mode
+  (setq-default c-ts-mode-indent-offset 4))
 
 ;;; Lua
 
