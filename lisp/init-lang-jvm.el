@@ -413,11 +413,14 @@ off a JDK its Gradle import cannot cope with."
                         "-data" (init/jvm--cache-directory "jdtls" root)
                         (format "--jvm-arg=-Xmx%s" init/jvm-java-heap))))))
 
-(defun init/jvm--installed-jdks ()
+(defun init/jvm-installed-jdks ()
   "Return the installed JDKs, as an alist of release number to directory.
 Sorted by release, one directory per release, so `init/jvm-jdk-search-paths'
 acts as a preference order.  Directories with no compiler, a bare JRE
-among them, are not JDKs and are skipped."
+among them, are not JDKs and are skipped.
+
+Public because init-lang-scala.el has to choose a JDK for Metals, and
+there is only one right way to look for one."
   (let (jdks)
     (dolist (pattern init/jvm-jdk-search-paths)
       (dolist (directory (file-expand-wildcards (expand-file-name pattern) t))
@@ -436,7 +439,7 @@ server itself runs on."
   (vconcat (mapcar (lambda (jdk)
                      (list :name (format "JavaSE-%d" (car jdk))
                            :path (cdr jdk)))
-                   (init/jvm--installed-jdks))))
+                   (init/jvm-installed-jdks))))
 
 (defun init/jvm--java-server-home ()
   "Return the JDK the Java server and its Gradle import should run under.
@@ -446,7 +449,7 @@ the machine fails an import that a supported LTS completes.  The lowest
 installed release at or above `init/jvm-java-server-jdk' is chosen."
   (when init/jvm-java-server-jdk
     (cdr (seq-find (lambda (jdk) (>= (car jdk) init/jvm-java-server-jdk))
-                   (init/jvm--installed-jdks)))))
+                   (init/jvm-installed-jdks)))))
 
 (defun init/jvm--gradle-wrapper-version ()
   "Return the Gradle release this build's wrapper pins, or nil.
@@ -844,21 +847,21 @@ name runs that task for the module alone."
 ;;;; Keybindings
 
 (with-eval-after-load 'kotlin-mode
-  (define-key kotlin-mode-map (kbd bind/jvm-gradle-task) #'init/jvm-gradle-task)
+  (define-key kotlin-mode-map (kbd bind/jvm-build-task) #'init/jvm-gradle-task)
   (define-key kotlin-mode-map (kbd bind/jvm-help) #'init/jvm-show-keybindings))
 
 (with-eval-after-load 'kotlin-ts-mode
-  (define-key kotlin-ts-mode-map (kbd bind/jvm-gradle-task)
+  (define-key kotlin-ts-mode-map (kbd bind/jvm-build-task)
               #'init/jvm-gradle-task)
   (define-key kotlin-ts-mode-map (kbd bind/jvm-help)
               #'init/jvm-show-keybindings))
 
 (with-eval-after-load 'cc-mode
-  (define-key java-mode-map (kbd bind/jvm-gradle-task) #'init/jvm-gradle-task)
+  (define-key java-mode-map (kbd bind/jvm-build-task) #'init/jvm-gradle-task)
   (define-key java-mode-map (kbd bind/jvm-help) #'init/jvm-show-keybindings))
 
 (with-eval-after-load 'java-ts-mode
-  (define-key java-ts-mode-map (kbd bind/jvm-gradle-task)
+  (define-key java-ts-mode-map (kbd bind/jvm-build-task)
               #'init/jvm-gradle-task)
   (define-key java-ts-mode-map (kbd bind/jvm-help)
               #'init/jvm-show-keybindings))
@@ -866,8 +869,8 @@ name runs that task for the module alone."
 (with-eval-after-load 'which-key
   (which-key-add-key-based-replacements
     "C-c j" "jvm"
-    bind/jvm-gradle-task "gradle task"
-    bind/jvm-help "kotlin/java cheatsheet"))
+    bind/jvm-build-task "build task"
+    bind/jvm-help "language cheatsheet"))
 
 (provide 'init-lang-jvm)
 ;;; init-lang-jvm.el ends here

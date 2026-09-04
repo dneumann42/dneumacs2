@@ -151,10 +151,34 @@
 (defconst bind/ocaml-help "C-c o ?"
   "Key sequence for the OCaml cheatsheet.")
 
-(defconst bind/jvm-gradle-task "C-c j t"
-  "Key sequence for running an arbitrary Gradle task.")
+(defconst bind/jvm-build-task "C-c j t"
+  "Key sequence for running an arbitrary build tool task.
+Gradle in Kotlin and Java buffers, sbt or mill in Scala ones.")
 (defconst bind/jvm-help "C-c j ?"
-  "Key sequence for the Kotlin and Java cheatsheet.")
+  "Key sequence for the cheatsheet of the JVM language being edited.")
+
+;; Metals answers questions no other server here does, so Scala carries a
+;; few commands of its own under the same JVM prefix.
+(defconst bind/scala-new-project "C-c j n"
+  "Key sequence for creating a new Scala project.
+Also reachable as `M-x init/scala-new-project', since the first project
+on a machine is made from a buffer that is not yet a Scala one.")
+(defconst bind/scala-build "C-c j b"
+  "Key sequence for compiling a Scala build, tests included.")
+(defconst bind/scala-import-build "C-c j i"
+  "Key sequence for re-importing the Scala build into Metals.")
+(defconst bind/scala-restart-build "C-c j R"
+  "Key sequence for restarting the build server Metals compiles through.")
+(defconst bind/scala-clean-compile "C-c j c"
+  "Key sequence for recompiling the Scala build from scratch.")
+(defconst bind/scala-cascade-compile "C-c j C"
+  "Key sequence for compiling this file and its dependents.")
+(defconst bind/scala-doctor "C-c j d"
+  "Key sequence for the Metals Doctor report.")
+(defconst bind/scala-organize-imports "C-c j o"
+  "Key sequence for sorting and pruning the Scala import list.")
+(defconst bind/scala-goto-super "C-c j u"
+  "Key sequence for jumping to the method this one overrides.")
 
 (defconst bind/nim-mark-token "C-M-SPC"
   "Key sequence for marking the Nim token at point.")

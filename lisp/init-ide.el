@@ -20,6 +20,7 @@
 
 ;;; Code:
 
+(require 'pcase)
 (require 'subr-x)
 (require 'init-keys)
 
@@ -73,6 +74,24 @@
   :type 'string
   :group 'init/lsp)
 
+(defvar init/ide-workspace-configurations nil
+  "Alist mapping a major mode to the function configuring its server.
+Each function is called with the `eglot-lsp-server' and returns the
+settings to send it.
+
+A language cannot simply set `eglot-workspace-configuration'
+buffer-locally: Eglot reads that variable inside a *temporary* buffer at
+the project root, so a value set in the buffer being edited is never
+seen.  What that temporary buffer does carry is the major mode the
+server was started in, which is what this dispatches on.")
+
+(defun init/ide-workspace-configuration (server)
+  "Return the workspace configuration Eglot should send SERVER.
+Languages that registered nothing get nil, which is what Eglot would
+have sent anyway."
+  (when-let* ((entry (assq major-mode init/ide-workspace-configurations)))
+    (funcall (cdr entry) server)))
+
 (use-package eglot
   :ensure nil
   :commands (eglot eglot-ensure eglot-code-actions eglot-reconnect
@@ -88,6 +107,14 @@
   ;; jumped *to*, so it cannot be set per language.
   (eglot-extend-to-xref t)
   :config
+  ;; `eglot-workspace-configuration' is a `defvar-local', not a custom
+  ;; option, so it has to be given a default here rather than through
+  ;; `:custom': loading Eglot would reset anything set before it, and a
+  ;; plain `setq' would only ever reach one buffer.  See
+  ;; `init/ide-workspace-configurations' for why a function is the only
+  ;; workable value.
+  (setq-default eglot-workspace-configuration
+                #'init/ide-workspace-configuration)
   ;; Kotlin and Java are absent from this list on purpose: their command
   ;; lines depend on which build the buffer belongs to, so
   ;; init-lang-jvm.el registers a function for each instead.
@@ -167,20 +194,34 @@
     (flymake-show-buffer-diagnostics))
    (t (message "No diagnostics UI available."))))
 
+(defun init/ide--code-action-bounds ()
+  "Return the range code actions should be asked about, as (BEG END).
+The region when there is one, and otherwise point itself.  Eglot widens
+a bare point to the whole sexp around it, and a server may read that
+range as \"the user has selected this much\" and answer for the
+selection rather than for the cursor.  Metals does: on an identifier it
+drops `Create companion object' given the wider range, and in a file
+whose one definition already matches its name that leaves no actions at
+all -- which looks like a language server with nothing to offer."
+  (if (use-region-p)
+      (list (region-beginning) (region-end))
+    (list (point) (point))))
+
 (defun init/ide--default-actions ()
-  "Offer code actions via Eglot."
+  "Offer the code actions available where point is."
   (if (fboundp 'eglot-code-actions)
-      (call-interactively #'eglot-code-actions)
+      (pcase-let ((`(,beg ,end) (init/ide--code-action-bounds)))
+        (eglot-code-actions beg end nil t))
     (message "No code action command available.")))
 
 (defun init/ide--default-fix ()
-  "Offer quick fixes via Eglot, falling back to general code actions."
-  (cond
-   ((fboundp 'eglot-code-action-quickfix)
-    (call-interactively #'eglot-code-action-quickfix))
-   ((fboundp 'eglot-code-actions)
-    (call-interactively #'eglot-code-actions))
-   (t (message "No quick fix command available."))))
+  "Offer the quick fixes at point, or every action when there are none."
+  (if (not (fboundp 'eglot-code-actions))
+      (message "No quick fix command available.")
+    (pcase-let ((`(,beg ,end) (init/ide--code-action-bounds)))
+      (condition-case nil
+          (eglot-code-actions beg end "quickfix" t)
+        (error (eglot-code-actions beg end nil t))))))
 
 (defun init/ide--default-reconnect ()
   "Reconnect the Eglot server managing the current buffer, if any."

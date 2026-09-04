@@ -61,6 +61,7 @@
 (require 'init-ide)
 (require 'init-lang-eglot)
 (require 'init-lang-jvm)
+(require 'init-lang-scala)
 (require 'init-lang-lisp)
 (require 'init-lang-nim)
 (require 'init-owl)

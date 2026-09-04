@@ -245,6 +245,73 @@ Interactively, prompt with completion over the registered cheatsheets."
     (:note "Everything else is the shared IDE keymap;")
     (:note "see the \"Coding & LSP\" guide.")))
 
+(cheatsheet-define "Scala"
+  '("Starting out"
+    (init/scala-new-project    "Create a new project (sbt or scala-cli)")
+    (init/scala-install-server "Install or update Metals and the tools")
+    (init/scala-write-scalafmt-config
+     "Make this project's formatter indent like the editor")
+    (:note "The first two work before any Scala file exists.")
+    (:note "sbt, scala-cli and scalafmt are installed into")
+    (:note "lsp-servers/scala-tools and put on Emacs's own PATH.  Add")
+    (:note "that directory to your shell PATH to use them outside Emacs."))
+  '("Editing (indentation is significant)"
+    (init/scala-newline         "New line, one level deeper after `:' or `='"
+                                :in scala-mode-map)
+    (init/scala-backspace       "Dedent one level, in the leading whitespace"
+                                :in scala-mode-map)
+    (:keys "TAB" "Indent; press again to step out a level")
+    (init/scala-shift-right     "Indent the region a level deeper"
+                                :in scala-mode-map)
+    (init/scala-shift-left      "Indent the region a level shallower"
+                                :in scala-mode-map)
+    (init/scala-open-line-below "Open a line below, at the right level"
+                                :in scala-mode-map)
+    (init/scala-open-line-above "Open a line above, at this level"
+                                :in scala-mode-map)
+    (newline-and-indent         "Reindent as the major mode would"
+                                :in scala-mode-map)
+    (:note "Nothing is reindented as you type; TAB is how a")
+    (:note "recalculation is asked for.  A second TAB steps out,")
+    (:note "which is how `else', `case' and `end' are put back."))
+  '("Build & test"
+    (init/ide-run           "Run the module (sbt, mill or scala-cli)"
+                            :in init/ide-mode-map)
+    (init/scala-build       "Compile the build, tests included"
+                            :in scala-mode-map)
+    (init/ide-test-at-point "Run the test around point"  :in init/ide-mode-map)
+    (init/ide-test-file     "Run this file's test class" :in init/ide-mode-map)
+    (init/ide-test-project  "Run every test in the build" :in init/ide-mode-map)
+    (init/ide-repl          "Open a REPL on the classpath" :in init/ide-mode-map)
+    (init/scala-build-task  "Run any sbt or mill task"   :in scala-mode-map))
+  '("Metals"
+    (init/ide-sync                "Re-import the build after editing it"
+                                  :in init/ide-mode-map)
+    (init/scala-doctor            "Doctor: why does this not resolve?"
+                                  :in scala-mode-map)
+    (init/scala-organize-imports  "Sort and prune the imports"
+                                  :in scala-mode-map)
+    (init/scala-goto-super-method "Jump to the method this overrides"
+                                  :in scala-mode-map)
+    (init/scala-cascade-compile   "Compile this file and its dependents"
+                                  :in scala-mode-map)
+    (init/scala-clean-compile     "Recompile the build from scratch"
+                                  :in scala-mode-map)
+    (init/scala-restart-build     "Restart the build server"
+                                  :in scala-mode-map)
+    (init/ide-reconnect           "Restart Metals itself"
+                                  :in init/ide-mode-map)
+    (:note "Code actions on a class or trait name offer to extract it")
+    (:note "to its own file, or to create its companion object."))
+  '("Notes"
+    (:note "Metals, a JDK it supports, and the sbt, scala-cli and")
+    (:note "scalafmt launchers install on first use into lsp-servers/.")
+    (:note "Inferred types and implicits show as inlay hints; turn")
+    (:note "them off with `init/scala-inlay-hints'.")
+    (:note "Format on save applies only where .scalafmt.conf exists.")
+    (:note "Everything else is the shared IDE keymap;")
+    (:note "see the \"Coding & LSP\" guide.")))
+
 (cheatsheet-define "Nim"
   '("Documentation"
     (init/nim-doc-search   "Search the stdlib index"  :in nim-mode-map)

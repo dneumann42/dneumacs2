@@ -40,6 +40,7 @@ name. `init.el` lists them in load order and nothing else.
 | `init-ide` | Language servers and the shared IDE command layer |
 | `init-lang-eglot` | C/C++, Lua, Rust, OCaml, Python, Ruby, RON |
 | `init-lang-jvm` | Kotlin and Java, their servers and Gradle |
+| `init-lang-scala` | Scala, Metals and the sbt/mill/scala-cli tasks |
 | `init-lang-lisp` | Emacs Lisp, Scheme (Geiser), Common Lisp (SLY) |
 | `init-lang-nim` | Nim, including the documentation browser |
 | `init-owl` | The Owl major mode |
@@ -68,17 +69,49 @@ set one, otherwise a shared default, usually Eglot.
 
 So <kbd>M-RET</kbd> always means "code actions" and <kbd>f5</kbd> always
 means "run", whatever the language, and a language module only has to
-declare where it differs. `C-c g` opens the cheatsheets, which look their
+declare where it differs. Code actions are asked for at point rather
+than over the symbol around it: Eglot widens a bare point to the whole
+sexp, and a server that reads that as a selection answers more narrowly
+for it — Metals returns nothing at all on a lone class or trait whose
+name already matches its file. `C-c g` opens the cheatsheets, which look their
 key sequences up live and therefore cannot go stale.
 
-Most languages name a server in `init-ide.el` and are done. Kotlin and
-Java are the exception (`init-lang-jvm.el`): their servers are downloaded
-on first use rather than assumed installed, and each server is rooted at
-the *build* a file belongs to — the nearest `settings.gradle.kts` — so a
-component of a Gradle composite build is indexed on its own instead of
-dragging in the umbrella above it. That root is applied through a
-buffer-local `project-find-functions` entry, so nothing else changes how
-projects resolve.
+Most languages name a server in `init-ide.el` and are done. The JVM
+languages are the exception (`init-lang-jvm.el`, `init-lang-scala.el`):
+their servers are downloaded on first use rather than assumed installed,
+and each server is rooted at the *build* a file belongs to — the nearest
+`settings.gradle.kts`, or `project/build.properties` — so a component of
+a composite build is indexed on its own instead of dragging in the
+umbrella above it. That root is applied through a buffer-local
+`project-find-functions` entry, so nothing else changes how projects
+resolve.
+
+Scala goes furthest, because Metals is the one server here that offers
+more than LSP: `init-lang-scala.el` installs Coursier, a JDK Metals
+supports, Metals itself and the sbt, scala-cli and scalafmt launchers,
+then wires up the Metals extensions that make it feel like an IDE —
+build import, the Doctor report, and the focus notification that keeps
+diagnostics current in the file you just switched to.
+
+Scala 3 also made indentation significant, so `init-lang-scala.el` owns
+editing as well: nothing is reindented as you type, RET opens the next
+line one level deeper after a `:` or `=`, DEL dedents, and a repeated TAB
+steps out a level at a time — the same treatment `init-lang-nim.el` gives
+Nim, and for the same reason. scala-mode's Scala 2 electric reindenting
+is switched off in the process.
+
+It also starts from nothing: `M-x init/scala-new-project` writes a
+working sbt or scala-cli project, tests and formatter config included,
+without a network or a JVM. The `.scalafmt.conf` it writes names
+`indent.defnSite` and `indent.extendSite` as well as `indent.main`,
+because scalafmt otherwise steps a wrapped signature by four columns
+whatever the main indent is — a Scala 2 habit that reads as a mistake in
+indentation-based code. `M-x init/scala-write-scalafmt-config` puts that
+file into a project that predates it. The tools it installs live in
+`lsp-servers/scala-tools` and are put on Emacs's own `exec-path`, so
+they need no place in your shell profile — add that directory to `PATH`
+yourself if you want `sbt` in a terminal too. Builds run on the same JDK
+Metals does, so a project cannot compile in one and fail in the other.
 
 ## Startup and shutdown
 
